@@ -61,6 +61,7 @@ admin/php8compat.php 【新增】PHP 8 兼容层
 | B | SQL 转义加固 | 735 处 `addslashes` → 字符集安全的 `vb_escape`；42 个数值请求参数在引导层强转 |
 | C | 登录态下的 TypeError | 规范化 `timezoneoffset`；`floor(phpversion())` 系列加显式数值转换 |
 | D | 中文 / UTF-8 支持 | 全站显式 `UTF-8` 声明（HTTP 头 + meta）；连接固定 `utf8mb4`；表转 `utf8mb4` |
+| E | 中文发帖乱码（发布链路） | `censortext()` 两处按字节 `chr(173)`/`chr(160)` 替换改为匹配完整 UTF-8 序列 |
 | — | 验证 | PHP 8.5.12 + MariaDB 13.0.1 真库端到端回归 |
 
 以下按文件逐项说明。
@@ -212,6 +213,41 @@ vBulletin 2.3.11 是 `windows-1252`（单字节）时代的应用，模板里**�
 验证：连接字符集 `utf8mb4`；新增 emoji（`F0 9F 98 80`）与中文（`E6 B5 8B E8 AF 95`）
 写入/读出字节完全一致，不再产生 `U+FFFD`；页面同时带 HTTP 头与 meta 的 UTF-8 声明。
 
+### 4.10 中文发帖乱码：`censortext()` 按字节替换（真正的发布链路根因）
+
+上面 4.9 只解决了「显示 / 存储」层；实际发帖时中文仍会乱码，根因在
+`admin/functions.php::censortext()`（发主题、回帖、私信都会调用）：
+
+```php
+$text = str_replace(chr(173), '_', $text);   // 0xAD  soft hyphen
+$text = str_replace(chr(160), '_', $text);   // 0xA0  NBSP
+```
+
+这是单字节（windows-1252）时代的写法：直接替换**裸字节** 0xAD / 0xA0。但在 UTF-8 下，
+很多汉字的末字节恰好是 0xAD 或 0xA0 —— 例如 **「中」= `E4 B8 AD`**。于是「中」的
+第三个字节被换成 `_`（0x5F），产生非法 UTF-8 序列 `E4 B8 5F`；随后：
+
+- 标题经过 `htmlspecialchars($subject)`，PHP 8 默认的 `ENT_SUBSTITUTE` 把非法序列
+  替换成 `U+FFFD`（`EF BF BD`）；
+- 正文不经过 `htmlspecialchars()`，非法字节写入 MySQL 时被转成 `?`（0x3F）。
+
+这解释了为什么「我再测试一下」完全正常（不含 0xAD/0xA0 字节），而含「中」的
+标题/正文变成 `?_?` 或 `U+FFFD`。修复：改为匹配**完整的 UTF-8 两字节序列**：
+
+```php
+$text = str_replace("\xC2\xAD", '_', $text);   // U+00AD
+$text = str_replace("\xC2\xA0", '_', $text);   // U+00A0
+```
+
+单测：`中文测试帖😀_中文` 经 `censortext()` 后字节完全一致、仍为合法 UTF-8，
+且 soft hyphen / NBSP 依旧被替换为 `_`。端到端 HTTP 发帖（标题
+`中文发帖测试_😀_中`）验证：库中为
+`E4B8AD E69687 ... F09F9880 5F E4B8AD`，无 `U+FFFD`、中文与 emoji 均完整；
+预览（Preview）路径同样无乱码且不写库。
+
+> 注：早期验证曾用 SQL `CONCAT` 直接追加字符，绕过了 `censortext()` 等 PHP 处理链，
+> 因此没暴露这个问题。以真实表单 POST 为准。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -260,6 +296,8 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | 后台登录 | 错误密码被拒且不下发认证 cookie；正确密码进 3-frame 控制台 |
 | SQL 转义行为 | 输出与改动前逐字节一致（`vb_escape` 与 `addslashes` 在本字符集下等价），注入载荷被正确中和 |
 | UTF-8 中文 | 连接 `utf8mb4`；emoji + 中文写入/读出字节一致，无新增 `U+FFFD`；页面带 HTTP 头与 meta 双声明 |
+| 中文发帖（真实 POST） | `中文发帖测试_😀_中` 标题/正文完整入库，无 `U+FFFD`、无 `?`；预览路径同样正常 |
+| 回归 | 3 种登录态 × 15 页面 0 错误；两树 `php -l` 全通过 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）
 
@@ -279,7 +317,8 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 7. 安装脚本与 21 个 `upgrade*.php` 无鉴权，必须移出 web root 或在服务器层拦截。
 8. 应用内部大量 `strlen()` / `substr()` / `wordwrap()` 按**字节**处理字符串，对 UTF-8
    多字节文本仍可能截断或错误换行；BBCode 的 `/e` 问题（第 5 条）同样未修。
-   另外，历史数据中已变成 `U+FFFD` 的字符无法自动还原（见 4.9）。
+   另外，历史数据中已变成 `U+FFFD` / `?` 的字符无法自动还原（见 4.9 / 4.10），
+   需要重新编辑对应帖子；`censortext()` 修复后新发的内容不会再出现此问题。
 
 ## 9. 再次声明
 

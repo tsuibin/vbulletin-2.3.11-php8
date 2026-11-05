@@ -1090,8 +1090,14 @@ function censortext($text) {
     }
   }
 
-  $text = str_replace(chr(173), '_', $text);
-  $text = str_replace(chr(160), '_', $text);
+  // PHP 4 / windows-1252 era: these replaced the bare bytes 0xAD (soft hyphen)
+  // and 0xA0 (NBSP). Under UTF-8 those characters are the 2-byte sequences
+  // C2 AD / C2 A0; replacing the bare byte corrupts any multibyte character
+  // whose last byte happens to be 0xAD or 0xA0 (e.g. U+4E2D = E4 B8 AD),
+  // yielding invalid UTF-8 that htmlspecialchars() turns into U+FFFD and MySQL
+  // into '?'. Match the complete UTF-8 sequences instead.
+  $text = str_replace("\xC2\xAD", '_', $text);
+  $text = str_replace("\xC2\xA0", '_', $text);
 
   return $text;
 }
