@@ -3,14 +3,38 @@
  * Extract every translatable UI string from the vBulletin templates.
  * Writes admin/lang_en.php (key = English source text, value = English).
  *
- * Usage: php tools/extract_lang.php
+ * Usage (command line only): php tools/extract_lang.php
+ *
+ * This file must never be reachable over HTTP: it connects to the board
+ * database and overwrites admin/lang_en.php, so a GET must not run it.
  */
+if (PHP_SAPI !== 'cli') {
+    if (!headers_sent()) {
+        header('HTTP/1.1 404 Not Found');
+    }
+    echo "Not Found\n";
+    exit;
+}
+
 require_once __DIR__ . '/../admin/php8compat.php';
+
+// Credentials come from admin/config.php, the same file the board uses, so this
+// tool never carries its own copy of the database account.
+$configfile = __DIR__ . '/../admin/config.php';
+if (!is_file($configfile)) {
+    fwrite(STDERR, "admin/config.php not found\n");
+    exit(1);
+}
+require_once $configfile;
 require_once __DIR__ . '/../admin/db_mysql.php';
 
 $db = new DB_Sql_vb;
-$db->server = '127.0.0.1'; $db->user = 'root'; $db->password = '';
-$db->database = 'vbulletin'; $usepconnect = 0; $db->connect();
+$db->server = $servername;
+$db->user = $dbusername;
+$db->password = $dbpassword;
+$db->database = $dbname;
+$usepconnect = isset($usepconnect) ? $usepconnect : 0;
+$db->connect();
 
 $stop = array_flip(array('the','a','an','and','or','of','to','in','on','for','is','are','be','it','this','that','with','by','as','at','from','no','yes','here'));
 
@@ -29,7 +53,7 @@ function vb_extract_candidate($t, $stop) {
 
 function vb_extract_from_html($html, &$out, $stop) {
     $html = preg_replace('/<!--.*?-->/s', '', $html);
-    $html = preg_replace('/]*>.*?<\/script>/is', '', $html);
+    $html = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $html);
     $html = preg_replace('/<style\b[^>]*>.*?<\/style>/is', '', $html);
     $html = preg_replace('/<textarea\b[^>]*>.*?<\/textarea>/is', '', $html);
     $parts = preg_split('/(<[^>]+>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
