@@ -187,7 +187,7 @@ if ($addheaders and !$noheader) {
   // default headers
   @header("HTTP/1.0 200 OK");
   @header("HTTP/1.1 200 OK");
-  @header("Content-type: text/html");
+  @header("Content-type: text/html; charset=UTF-8");
 }
 
 if ($nocacheheaders and !$noheader) {
@@ -331,7 +331,11 @@ $copyrightyear = date('Y');
 eval(gettemplate('phpinclude',0,0));
 
 // parse css, header & footer ##################
-eval("\$headinclude = \"".gettemplate('headinclude')."\";");
+// vBulletin 2.x ships no charset declaration in its templates; declare UTF-8
+// in both the HTTP header and the document so browsers never guess a
+// single-byte encoding for multi-byte content.
+$headinclude = '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">' . "\n";
+eval("\$headinclude .= \"".gettemplate('headinclude')."\";");
 eval("\$header .= \"".gettemplate('header')."\";");
 eval("\$footer .= \"".gettemplate('footer')."\";");
 

@@ -60,6 +60,7 @@ admin/php8compat.php 【新增】PHP 8 兼容层
 | A | PHP 8 可运行 | 新增兼容层；自动改写 472 处长数组、2967 处裸数组键、275 处短标签；`mysql_*` → `mysqli_*` |
 | B | SQL 转义加固 | 735 处 `addslashes` → 字符集安全的 `vb_escape`；42 个数值请求参数在引导层强转 |
 | C | 登录态下的 TypeError | 规范化 `timezoneoffset`；`floor(phpversion())` 系列加显式数值转换 |
+| D | 中文 / UTF-8 支持 | 全站显式 `UTF-8` 声明（HTTP 头 + meta）；连接固定 `utf8mb4`；表转 `utf8mb4` |
 | — | 验证 | PHP 8.5.12 + MariaDB 13.0.1 真库端到端回归 |
 
 以下按文件逐项说明。
@@ -186,6 +187,31 @@ ext/mysql 在 PHP 7.0 移除。重写 `DB_Sql_vb` 类但**完全保留公开接�
   `calendar.php` / `member.php` 全部下游。
 - `admin/functions.php::vbdate()`：偏移量与 `$timeoffset` 都显式转 float 再算术。
 
+### 4.9 中文 / UTF-8 支持
+
+vBulletin 2.3.11 是 `windows-1252`（单字节）时代的应用，模板里**没有任何 charset
+声明**，后台 CP 与升级脚本则写死 `charset=windows-1252`。中文内容因此会乱码：
+
+- 页面只靠 PHP `default_charset` 自动附加的 HTTP 头，浏览器可能按单字节编码猜测；
+- 数据库表若为 `utf8mb3`（MySQL/MariaDB 的 `utf8` 别名，最多 3 字节），4 字节字符
+  （emoji、部分 CJK 扩展）写入时被替换成 `U+FFFD`（`EF BF BD`），**且不可恢复**。
+
+修复（源码层，两个站点树同步）：
+
+- `global.php`：`@header("Content-type: text/html; charset=UTF-8")` 明确响应头；并在
+  `$headinclude` 前置 `<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">`，
+  双保险避免浏览器猜编码。
+- `admin/db_mysql.php::connect()`：`mysqli_set_charset($link, 'utf8mb4')` 固定连接字符集。
+- 全树 22 处 `charset=windows-1252` → `charset=UTF-8`（后台 CP 的 `cpheader()` 与
+  21 个 `upgrade*.php`）。
+- **已有数据库需自行转换**（源码改动不会改已存在的数据）：
+  `ALTER TABLE <t> CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+  对所有表执行，并 `ALTER DATABASE ... CHARACTER SET utf8mb4`。转换前请先备份。
+  已转成 `U+FFFD` 的历史字符无法自动还原，需重新编辑对应帖子。
+
+验证：连接字符集 `utf8mb4`；新增 emoji（`F0 9F 98 80`）与中文（`E6 B5 8B E8 AF 95`）
+写入/读出字节完全一致，不再产生 `U+FFFD`；页面同时带 HTTP 头与 meta 的 UTF-8 声明。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -193,7 +219,7 @@ ext/mysql 在 PHP 7.0 移除。重写 `DB_Sql_vb` 类但**完全保留公开接�
 | PHP | 8.x（实测 **8.5.12**）；需启用 `mysqli`，`gd` 可选（验证码/头像） |
 | 数据库 | MySQL / MariaDB（实测 **MariaDB 13.0.1**） |
 | 不再需要 | `register_globals`、`register_long_arrays`、magic quotes、`short_open_tag`、ext/mysql |
-| 字符集 | 应用为 `windows-1252`；连接字符集由 `mysqli_real_escape_string()` 自动适配 |
+| 字符集 | **UTF-8 / `utf8mb4`**：表、连接、HTTP 头、HTML meta 四者需一致。新建库请用 `CREATE DATABASE ... CHARACTER SET utf8mb4`；存量库需 `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4`（见 4.9） |
 | Web 服务 | 任意能执行 PHP 的服务器；`admin/` 下 21 个 `upgrade*.php` 与安装脚本**必须禁止 Web 访问** |
 
 ## 6. 本地测试环境（示例）
@@ -233,6 +259,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | 3 种登录态（匿名 / `''` / `'+8'` 时区）× 15 页面 | 全部 200、0 PHP 错误 |
 | 后台登录 | 错误密码被拒且不下发认证 cookie；正确密码进 3-frame 控制台 |
 | SQL 转义行为 | 输出与改动前逐字节一致（`vb_escape` 与 `addslashes` 在本字符集下等价），注入载荷被正确中和 |
+| UTF-8 中文 | 连接 `utf8mb4`；emoji + 中文写入/读出字节一致，无新增 `U+FFFD`；页面带 HTTP 头与 meta 双声明 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）
 
@@ -250,6 +277,9 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
    `preg_replace_callback`，属 BBCode 引擎级改动，**本仓库尚未修复**。
 6. `admin/config.php` 为占位凭据（`root` / `passwd`），部署时须自行修改。
 7. 安装脚本与 21 个 `upgrade*.php` 无鉴权，必须移出 web root 或在服务器层拦截。
+8. 应用内部大量 `strlen()` / `substr()` / `wordwrap()` 按**字节**处理字符串，对 UTF-8
+   多字节文本仍可能截断或错误换行；BBCode 的 `/e` 问题（第 5 条）同样未修。
+   另外，历史数据中已变成 `U+FFFD` 的字符无法自动还原（见 4.9）。
 
 ## 9. 再次声明
 

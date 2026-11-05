@@ -52,6 +52,11 @@ class DB_Sql_vb {
       // dates and partially-specified INSERTs the board relies on. Restore
       // the old behaviour for this connection only.
       @mysqli_query($this->link_id, "SET SESSION sql_mode=''");
+
+      // Pin the connection to utf8mb4. The original board is a single-byte
+      // (windows-1252) app; without this the server may negotiate utf8mb3 and
+      // silently replace 4-byte characters (emoji, some CJK) with U+FFFD.
+      @mysqli_set_charset($this->link_id, 'utf8mb4');
     }
   }
 

@@ -14,7 +14,7 @@ if ($gzipoutput and !headers_sent() and function_exists("ob_start") and function
 
 ?>
 <html><head>
-<meta content="text/html; charset=windows-1252" http-equiv="Content-Type">
+<meta content="text/html; charset=UTF-8" http-equiv="Content-Type">
 <meta http-equiv="MSThemeCompatible" content="Yes">
 <link rel="stylesheet" href="../cp.css">
 <?php

@@ -55,7 +55,7 @@ $DB_site->password="";
 
 ?>
 <HTML><HEAD>
-<META content="text/html; charset=windows-1252" http-equiv=Content-Type>
+<META content="text/html; charset=UTF-8" http-equiv=Content-Type>
 <META content="MSHTML 5.00.3018.900" name=GENERATOR></HEAD>
 <link rel="stylesheet" href="../cp.css">
 <title>vBulletin <?php echo $oldversion ?> to <?php echo $newversion ?> Upgrade script</title>
