@@ -405,6 +405,60 @@ ALTER TABLE customavatar MODIFY avatardata LONGBLOB NOT NULL;
 并且要同步到**编译后的 options 模板**（`template.title='options'` 里的 `$viewattachedimages = "1";`）——
 只改 `setting` 表运行时不生效。安装器已默认开启这两项。
 
+存量站点（不是用本版安装器新建的库）需要自己同步，否则只有新装库才生效：
+
+```sql
+UPDATE setting SET value='1' WHERE varname IN ('viewattachedimages');
+UPDATE forum SET allowimages='1' WHERE forumid IN (1,2);
+```
+
+### 4.16 i18n 层与运维入口的加固
+
+这一轮修的是语言层自身的边界问题，不涉及业务逻辑。
+
+**`tools/extract_lang.php` 改为 CLI-only**
+这个文件原本放在仓库根目录的 `tools/` 下，无鉴权、硬编码 `root`/空密码，任何人对它发一次
+HTTP 请求就会连库并**覆盖写 `admin/lang_en.php`**。现在：
+
+- 开头 `if (PHP_SAPI !== 'cli')` 直接返回 404 并退出；
+- 连接参数改为 `require admin/config.php`，与站点共用同一份配置，工具里不再有第二份凭据；
+- 顺手修了剥离 `<script>` 块的正则（原文件里 `<script\b[^>]*>` 被漏成 `]*>`，导致脚本内
+  字符串被当成界面文案抽取，`lang_en.php` 里因此混入过 `<script language="JavaScript"`）。
+
+部署时 `tools/` 仍应和安装脚本一样禁止 Web 访问（见第 5 节）。
+
+**后台 CP 的整页翻译**
+后台页面是纯 PHP `echo`，没有模板，所以 i18n 靠 `ob_start()` 缓冲 + `register_shutdown_function`
+在输出末尾整体翻译。三处修正：
+
+- 翻译时传 `vblang_template($html, false)`，**不再翻译 `value` / `alt` / `title` / `placeholder`
+  属性**。后台全是表单，翻译控件 value 会让提交回库的数据变成中文；
+- 非英文语言下强制 `$nozip = 1`。`cpheader()`/`cpfooter()` 自己会开一层 ob 做 gzip，套在这层
+  缓冲外面时，压缩后的字节会被当成页面交给翻译器，输出损坏；
+- shutdown 里先 `while (ob_get_level() > 1) ob_end_flush()` 把嵌套缓冲收拢，再取内容，避免
+  只清掉一层导致内容丢失。
+
+**切换条位置**
+原来 `$footer = $vblangbar . $footer;` 把 `div` 塞在 footer 模板（自带 table 结构）之前，容易
+顶出错位横条。改为 `$footer .= $vblangbar;` 并加 `clear:both`，落在 footer 之后。
+
+**`?lang=` 的跳转归一化**
+`parse_url($_SERVER['REQUEST_URI'])` 取出的 path 在 `REQUEST_URI` 以 `//` 开头时是 `//host`，
+直接进 `Location:` 会被浏览器当作协议相对地址跳到站外。新增 `vb_lang_localpath()`，统一
+`'/' . ltrim($path, '/')` 后再拼接，`vb_lang_url()` 与 `vb_lang_switch()` 都用它。
+
+**`vblang_date()` 改为单次正则**
+原来对 36 个月份/星期词各跑一次 `preg_replace`，帖子列表页一页要执行上千次；现在按最长优先
+合成一条 `\b(...)\b` 正则，一次 `preg_replace_callback` 完成。改回调还有一个作用：译文里若含
+`$1` 或反斜杠，不会被当成反向引用解析。
+
+**语言包文案细节**
+
+- 月份统一为阿拉伯数字（`January` → `1月` … `December` → `12月`）。原来全称用中文数字、缩写
+  用数字，`May` 既是全称又是缩写只能取一个，同一页面会混排；
+- 统计/列表列头名词化：`Views` → `查看数`、`Replies` → `回复数`、`Threads:` → `主题数：`、
+  `Posts:` → `帖子数：`。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -413,7 +467,7 @@ ALTER TABLE customavatar MODIFY avatardata LONGBLOB NOT NULL;
 | 数据库 | MySQL / MariaDB（实测 **MariaDB 13.0.1**） |
 | 不再需要 | `register_globals`、`register_long_arrays`、magic quotes、`short_open_tag`、ext/mysql |
 | 字符集 | **UTF-8 / `utf8mb4`**：表、连接、HTTP 头、HTML meta 四者需一致。新建库请用 `CREATE DATABASE ... CHARACTER SET utf8mb4`；存量库需 `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4`（见 4.9） |
-| Web 服务 | 任意能执行 PHP 的服务器；`admin/` 下 21 个 `upgrade*.php` 与安装脚本**必须禁止 Web 访问** |
+| Web 服务 | 任意能执行 PHP 的服务器；`admin/` 下 21 个 `upgrade*.php`、安装脚本与 `tools/` 目录**必须禁止 Web 访问** |
 
 ## 6. 本地测试环境（示例）
 
