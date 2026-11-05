@@ -171,6 +171,25 @@ if (!function_exists('vbphrase')) {
         return $text;
     }
 
+    /** Translate a setting's help text, keyed by setting.varname. */
+    function vbsetting_desc($varname, $description)
+    {
+        static $map = null;
+        if ($map === null) {
+            $map = array();
+            if (vb_lang_current() === 'zh') {
+                $file = __DIR__ . '/lang_zh_settings.php';
+                if (is_file($file)) {
+                    $loaded = include $file;
+                    if (is_array($loaded)) {
+                        $map = $loaded;
+                    }
+                }
+            }
+        }
+        return isset($map[$varname]) ? $map[$varname] : $description;
+    }
+
     /** Build a ?lang=xx URL that keeps the current path and query. */
     function vb_lang_url($lang)
     {

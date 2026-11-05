@@ -61,6 +61,7 @@ logip
     $settings=$DB_site->query("SELECT settingid,title,varname,value,description,optioncode,displayorder FROM setting WHERE settinggroupid=$settinggroup[settinggroupid] ORDER BY displayorder");
     while ($setting=$DB_site->fetch_array($settings)) {
 
+      $setting['description'] = vbsetting_desc($setting['varname'], $setting['description']);
       echo "<tr class='".getrowbg()."'>\n<td width=\"65%\"><p><b>$setting[title]</b><br><font size='1'>$setting[description]</font></p></td>\n<td width=\"35%\">";
 
       if ($setting['optioncode']=="") {
