@@ -56,10 +56,20 @@ function doqueries() {
     if ($onvservers==1 and substr($val, 0, 5)=="ALTER") {
       $DB_site->reporterror=0;
     }
-    $DB_site->query($val);
+    // A MySQL CREATE TABLE can need several PostgreSQL statements (the table
+    // plus one CREATE INDEX per KEY), so the PostgreSQL db class returns a list
+    // of statements to run in order. The MySQL class has no convert_ddl() and
+    // keeps the single-statement path.
+    if (method_exists($DB_site, 'convert_ddl')) {
+      foreach ($DB_site->convert_ddl($val) as $ddl) {
+        $DB_site->query($ddl);
+      }
+    } else {
+      $DB_site->query($val);
+    }
     if ($onvservers==1 and substr($val, 0, 5)=="ALTER") {
       $DB_site->link_id=0;
-      @mysql_close();
+      $DB_site->close();
 
       sleep(1);
       $DB_site->connect();
@@ -233,11 +243,13 @@ if ($canwrite==0 and $fileexists) {
 if ($canwrite!=0 and $fileexists) {
 	// test out config
 	include("./config.php");
+	if (!isset($dbport)) { $dbport = ''; }
 
   echo "<form action=\"install4php5.php\" method=\"post\"><input type=hidden name=step value=writeconfig>";
 	echo "<p>Please confirm the details below:</p>\n";
 	echo "<p><b>Database server type:</b> <input name=\"dbservertype\" value=\"$dbservertype\"></p>\n";
 	echo "<p><b>Database server hostname / IP address:</b> <input name=\"servername\" value=\"$servername\"></p>\n";
+	echo "<p><b>Database server port:</b> <input name=\"dbport\" value=\"$dbport\" size=\"6\"> (留空用默认：mysql 3306 / pgsql 5432)</p>\n";
 	echo "<p><b>Database username:</b> <input name=\"dbusername\" value=\"$dbusername\"></p>\n";
 	echo "<p><b>Database password:</b> <input name=\"dbpassword\" value=\"$dbpassword\"></p>\n";
 	echo "<p><b>Database name:</b> <input name=\"dbname\" value=\"$dbname\"></p>\n";
@@ -253,6 +265,7 @@ if ($canwrite!=0 and !$fileexists) {
 	echo "<p>Please confirm the details below:</p>\n";
 	echo "<p><b>Database server type:</b> <input name=\"dbservertype\" value=\"mysql\"></p>\n";
 	echo "<p><b>Database server hostname / IP address:</b> <input name=\"servername\" value=\"localhost\"></p>\n";
+	echo "<p><b>Database server port:</b> <input name=\"dbport\" value=\"\" size=\"6\"> (留空用默认：mysql 3306 / pgsql 5432)</p>\n";
 	echo "<p><b>Database username:</b> <input name=\"dbusername\" value=\"root\"></p>\n";
 	echo "<p><b>Database password:</b> <input name=\"dbpassword\" value=\"\"></p>\n";
 	echo "<p><b>Database name:</b> <input name=\"dbname\" value=\"forum\"></p>\n";
@@ -280,11 +293,15 @@ $dbservertype = strtolower($dbservertype);
 /////////////////////////////////////////////////////////////
 
 // type of database running
-// (only mysql is supported at the moment)
+// mysql or pgsql
 \$dbservertype='$dbservertype';
 
 // hostname or ip of server
 \$servername='$servername';
+
+// port of the database server (5432 for PostgreSQL, 3306 for MySQL;
+// leave empty to use the default of the selected database type)
+\$dbport='$dbport';
 
 // username and password to log onto db server
 \$dbusername='$dbusername';
@@ -344,6 +361,9 @@ $DB_site->database=$dbname;
 $DB_site->server=$servername;
 $DB_site->user=$dbusername;
 $DB_site->password=$dbpassword;
+if (isset($dbport) and $dbport) {
+  $DB_site->port=$dbport;
+}
 
 // allow this script to catch errors
 $DB_site->reporterror=0;

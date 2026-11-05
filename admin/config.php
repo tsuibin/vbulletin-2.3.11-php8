@@ -6,11 +6,18 @@
 /////////////////////////////////////////////////////////////
 
 // type of database running
-// (only mysql is supported at the moment)
+// 'mysql' (MySQL / MariaDB) or 'pgsql' (PostgreSQL 12+)
 $dbservertype = 'mysql';
 
 // hostname or ip of server
 $servername = 'localhost';
+
+// port of the database server. Leave empty to use the default of the
+// selected $dbservertype (3306 for mysql, 5432 for pgsql)
+$dbport = '';
+
+// PostgreSQL only: schema that holds the vBulletin tables (default 'public')
+$dbschema = '';
 
 // username and password to log onto db server
 $dbusername = 'root';

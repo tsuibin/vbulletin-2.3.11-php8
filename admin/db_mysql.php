@@ -23,6 +23,12 @@ class DB_Sql_vb {
   public $server   = "localhost";
   public $user     = "root";
   public $password = "";
+  // Declared so that a $dbport in config.php can be assigned without creating
+  // a dynamic property (deprecated in PHP 8.2). Unused by the MySQL driver:
+  // the port goes with the host as "host:port" or through the socket.
+  public $port     = 0;
+  // Same for $dbschema (PostgreSQL only, but assigned unconditionally when set).
+  public $schema   = "";
 
   public $appname  = "vBulletin";
   public $appshortname = "vBulletin (cp)";

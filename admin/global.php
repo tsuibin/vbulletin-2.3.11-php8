@@ -121,6 +121,12 @@ $DB_site->database=$dbname;
 $DB_site->server=$servername;
 $DB_site->user=$dbusername;
 $DB_site->password=$dbpassword;
+if (isset($dbport) && $dbport) {
+	$DB_site->port = $dbport;
+}
+if (isset($dbschema) && $dbschema) {
+	$DB_site->schema = $dbschema;
+}
 
 $DB_site->connect();
 

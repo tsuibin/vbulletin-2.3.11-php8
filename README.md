@@ -484,12 +484,88 @@ return array(
 覆盖情况：171 个设置项标题、31 个设置组名全部有译文（脚本按安装器的 `INSERT` 逐条断言，
 缺一条就报错退出）。
 
+### 4.17 PostgreSQL 数据库支持
+
+vB2 的所有 SQL 都走 `admin/db_mysql.php` 里的那一个类（15 个方法），所以加 PG 支持不需要动
+业务代码：新增 **`admin/db_pgsql.php`**，用同名类 `DB_Sql_vb` 实现同一套接口，把 MySQL 方言
+在这一层翻译掉。
+
+**启用方式**（`admin/config.php`）：
+
+```php
+$dbservertype = 'pgsql';
+$dbport       = 5432;          // 留空则用默认端口
+$dbschema     = 'public';      // 表所在 schema，留空即 public
+```
+
+`global.php` / `admin/global.php` / 安装器都会把 `$dbport`、`$dbschema` 传给 DB 对象；不填则
+沿用原来的 MySQL 行为，无需改动现有部署。
+
+**接口层**：`connect / geterrdesc / geterrno / escape / select_db / query / fetch_array /
+free_result / query_first / data_seek / num_rows / num_fields / insert_id / close / halt`
+与 MySQL 版逐一对应。几点与 MySQL 不同的实现：
+
+- `escape()` 用 `pg_escape_string()`，连接上固定 `standard_conforming_strings=on`；
+  `php8compat.php` 的 `vb_escape()` 改为调用 `$DB_site->escape()`，不再硬编码 `mysqli`，
+  两个驱动共用一条转义路径。
+- `insert_id()` 用 `lastval()`。前提是自增列建成了 `serial` / `bigserial`（见下面的 DDL 转换），
+  且 INSERT 没有显式指定该列的值。
+- `halt()` 的报错页把 `mysql error` 换成 `pgsql error`，并同时打印原始 SQL 与翻译后的 SQL，
+  便于定位是哪条改写出的问题。
+
+**SQL 方言翻译**（`translate()`，只作用于代码部分，字符串字面量不动）：
+
+| MySQL 写法 | 出现次数 | 翻译为 |
+|---|---|---|
+| `LIMIT offset,count` | 会员列表、搜索、帖子列表等 | `LIMIT count OFFSET offset` |
+| `IF(cond,a,b)` | 14 | `(CASE WHEN cond THEN a ELSE b END)`，支持嵌套 |
+| `ISNULL(x)` | 2 | `(x IS NULL)` |
+| `UNIX_TIMESTAMP([date])` | 43 | `EXTRACT(EPOCH FROM ...)::bigint`，无参用 `now()` |
+| `FROM_UNIXTIME(ts[,fmt])` | 20 | `to_timestamp(ts)`，带格式则走 `to_char` + 格式码映射 |
+| `REPLACE INTO` | 3 | `INSERT ... ON CONFLICT (主键) DO UPDATE`，主键表在 `$primary_keys` 里声明 |
+| `INSERT ... VALUES (NULL, ...)` | 安装器 + 建表后插入 | 自增列的 `NULL` 改成 `DEFAULT`（PG 不接受显式 NULL） |
+| `LIKE` | 模板/搜索 | `ILIKE`（MySQL 那套 ci 排序规则是大小写不敏感的） |
+| `SHOW TABLES` / `SHOW FIELDS` / `SHOW KEYS` | 安装器、`admin/backup.php` | 查 `pg_tables` / `information_schema`，列名按 MySQL 的名字起别名 |
+| 表名 `user` | 全站 | `"user"`（`USER` 在 PG 里是保留字，且裸写会被当成 `current_user`） |
+
+前四项之外还有一处必须注意：**`admin/functions.php:2544` 的
+`LEFT JOIN style ON (IF(user.styleid=0, 1, user.styleid)=style.styleid)`**，就是最初那个
+`Unknown column 'user.styleid' in 'ON'` 的现场，在 PG 下同样走 `IF→CASE` 改写。
+
+**建表（DDL）转换**：安装器的 schema 是 94 条 MySQL `CREATE TABLE` 字符串，PG 跑不了。
+`db_pgsql.php` 提供 `convert_ddl()`，安装器的 `doqueries()` 检测到该方法后按「一条 MySQL 语句 →
+若干条 PG 语句」执行：
+
+- `int(10) unsigned` → `bigint`（MySQL unsigned int 上限 4294967295，超出 PG `integer`）；
+  `smallint/tinyint` → `smallint`，unsigned 的 `smallint` → `integer`
+- `text/mediumtext/longtext` → `text`，`blob` 系列 → `bytea`，`enum(...)` → `varchar(64)`
+- `auto_increment` → `serial` / `bigserial`，`NOT NULL` 去掉（serial 隐含非空）
+- 数值列的 `DEFAULT '0'` 去掉引号；`DEFAULT '0000-00-00'` → `DEFAULT NULL`
+- `KEY name (cols)` / `UNIQUE KEY` 拆成独立的 `CREATE INDEX`（一条表可能变成多条语句）
+- 索引里的前缀长度 `col(10)` 去掉（PG 不支持）
+
+安装器本身不用改流程：`$dbservertype` 由表单填写，填 `pgsql` 即走新驱动；数据库连不上时的
+「自动建库」分支保留 MySQL 的 `errno==1049` 判断，PG 侧请先手工 `createdb`。
+
+**明确未验证 / 已知缺口**（这一项与 4.9–4.16 不同，**没有在真实 PostgreSQL 上跑过**）：
+
+1. 本仓库的验证环境只有 MariaDB，PG 侧代码仅通过静态检查（括号/引号配平、接口方法对齐、
+   `convert_ddl` 规则逐条过），**未连接过任何 PG 实例**。
+2. **`GROUP BY` 严格模式**：PG 要求 SELECT 里所有非聚合列都出现在 `GROUP BY`，MySQL 不要求。
+   这类查询只能在跑到时暴露，没有逐条排查（论坛统计、日历、版块聚合是重点怀疑对象）。
+3. **整型列与空串比较**：`WHERE userid=''` 这类写法在 MySQL 里恒为假、在 PG 里直接报
+   `invalid input syntax for integer`。代码里主要走 PHP 判空，但无法断言全部干净。
+4. **`admin/backup.php` 的导出仍是 MySQL 方言**（`SHOW FIELDS` 靠上表里的 shim 勉强可用，
+   但生成的 `CREATE TABLE` 是 MySQL 语法），导出文件不能再导入 PG；`restore` 同理。
+5. 全文检索 / `searchindex` 的分词逻辑未按 PG 调整，`REPLACE INTO` 只处理了主键已知的三张表。
+6. 排序与大小写：`ORDER BY` 在 MySQL 默认 ci、PG 按字节序，中文/英文混排顺序会不一致。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
 |---|---|
 | PHP | 8.x（实测 **8.5.12**）；需启用 `mysqli`，`gd` 可选（验证码/头像） |
-| 数据库 | MySQL / MariaDB（实测 **MariaDB 13.0.1**） |
+| 数据库 | MySQL / MariaDB（实测 **MariaDB 13.0.1**）；也可选 PostgreSQL（`$dbservertype='pgsql'`，见 4.17，**尚未实测**） |
 | 不再需要 | `register_globals`、`register_long_arrays`、magic quotes、`short_open_tag`、ext/mysql |
 | 字符集 | **UTF-8 / `utf8mb4`**：表、连接、HTTP 头、HTML meta 四者需一致。新建库请用 `CREATE DATABASE ... CHARACTER SET utf8mb4`；存量库需 `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4`（见 4.9） |
 | Web 服务 | 任意能执行 PHP 的服务器；`admin/` 下 21 个 `upgrade*.php`、安装脚本与 `tools/` 目录**必须禁止 Web 访问** |

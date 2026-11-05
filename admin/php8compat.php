@@ -114,15 +114,18 @@ if (!function_exists('vb_ereg_pattern')) {
     // ---------------------------------------------------------------------
     // Charset-aware SQL string escaping. addslashes() is not safe: on a
     // connection using a multi-byte charset it can be tricked into leaving
-    // a quote unescaped. mysqli_real_escape_string() uses the connection's
-    // actual charset. Falls back to addslashes() before the DB is connected
-    // (e.g. bootstrap code that runs before config.php is loaded).
+    // a quote unescaped.
+    //
+    // Delegating to $DB_site->escape() keeps this driver-agnostic: the MySQL
+    // class uses mysqli_real_escape_string(), the PostgreSQL class uses
+    // pg_escape_string(). Falls back to addslashes() before the DB is
+    // connected (e.g. bootstrap code that runs before config.php is loaded).
     // ---------------------------------------------------------------------
     function vb_escape($value)
     {
         global $DB_site;
-        if (isset($DB_site->link_id) && $DB_site->link_id instanceof mysqli) {
-            return mysqli_real_escape_string($DB_site->link_id, (string) $value);
+        if (is_object($DB_site) && method_exists($DB_site, 'escape')) {
+            return $DB_site->escape((string) $value);
         }
         return addslashes((string) $value);
     }
