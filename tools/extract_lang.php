@@ -35,11 +35,15 @@ function vb_extract_from_html($html, &$out, $stop) {
     $parts = preg_split('/(<[^>]+>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
     foreach ($parts as $i => $seg) {
         if ($i % 2 == 1) continue;
-        if (vb_extract_candidate($seg, $stop)) $out[trim($seg)] = true;
+        if (vb_extract_candidate($seg, $stop)) {
+            $out[trim(preg_replace('/\s+/', ' ', $seg))] = true;
+        }
     }
     if (preg_match_all('/\b(value|alt|title|placeholder)\s*=\s*"([^"]*)"/i', $html, $m)) {
         foreach ($m[2] as $v) {
-            if (vb_extract_candidate($v, $stop)) $out[trim($v)] = true;
+            if (vb_extract_candidate($v, $stop)) {
+                $out[trim(preg_replace('/\s+/', ' ', $v))] = true;
+            }
         }
     }
 }
