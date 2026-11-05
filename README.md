@@ -64,6 +64,7 @@ admin/php8compat.php 【新增】PHP 8 兼容层
 | E | 中文发帖乱码（发布链路） | `censortext()` 两处按字节 `chr(173)`/`chr(160)` 替换改为匹配完整 UTF-8 序列 |
 | F | MySQL 8 JOIN 优先级 | 6 处 `FROM a,b LEFT JOIN c ON (...a.col...)` 改为显式 `JOIN ... ON` |
 | G | PHP 7 移除的 `/e` 修饰符 | `bbcodeparse2()` 6 条 + `unhtmlspecialchars()` 1 条改用 `preg_replace_callback`；新增 UTF-8 版 `vb_chr()` |
+| H | 界面文案 i18n | 新增 `lang_en.php` / `lang_zh.php` / `lang.php`，cookie 切换中英，模板源码级翻译（用户内容不受影响） |
 | — | 验证 | PHP 8.5.12 + MariaDB 13.0.1 真库端到端回归 |
 
 以下按文件逐项说明。
@@ -323,6 +324,37 @@ WHERE ...
 真实 HTTP 回帖的转跳页与主题页 0 条 `Unknown modifier` / `Warning`；
 3 种登录态 × 17 页面回归 0 错误。
 
+### 4.13 界面文案抽取与中英切换（i18n）
+
+vBulletin 2.3 没有语言层：界面文字散落在 488 个数据库模板和 PHP 代码里。本版新增一套**不改模板、不改表结构**的语言层。
+
+| 文件 | 作用 |
+|---|---|
+| `admin/lang_en.php` | 由工具自动抽取的**全量清单**（916 条，键=英文原文，值=英文） |
+| `admin/lang_zh.php` | 中文词表（432 条，键=英文原文）；缺失的键自动回退英文 |
+| `admin/lang.php` | 加载器：cookie 选择、`vbphrase()`、模板翻译、`?lang=` 切换 |
+| `tools/extract_lang.php` | 重新扫描全部模板，生成 `lang_en.php`（新增文案后可再跑） |
+
+**工作方式**
+
+- 语言来自 cookie `bblanguage`（`en` / `zh`），默认 `en`；也可在 `admin/config.php` 设 `$defaultlanguage`。
+- `?lang=zh` / `?lang=en` 设置一年期 cookie 并 302 回原地址（保留其余查询参数）；页脚有「中文 | English」切换条。
+- `gettemplate()` 在 **模板源码** 上做翻译：只替换整段文本节点和 `value` / `alt` / `title` / `placeholder` 属性；`<script>`、`<style>`、`<textarea>`、注释被保护。
+  **因为翻译发生在 eval 之前，帖子、私信、签名等用户内容永远不会被改写**。
+- 含 `$变量` 的模板（如 `All times are GMT. The time now is $timenow.`）会按 `$var` 切成静态片段逐段翻译。
+- PHP 侧文案用 `vbphrase('English')`；`vbdate()` 输出的月份/星期名也会翻译。
+
+**兼容 vB 2.3 原有逻辑**
+
+- 不修改任何数据库模板，`vbulletin.style` 也不变，升级/重装不受影响。
+- en 语言返回空映射，渲染路径与原来完全一致。
+- 只新增 4 个文件 + 3 处钩子（`functions.php` 加载、`gettemplate()` 翻译、`global.php` 切换）。
+
+**覆盖率**：模板侧抽取 916 条，已翻译 432 条（导航、版块/主题、发帖表单、分页、时间日期、账号、搜索、日历、常见错误与跳转提示）。未翻译的键回退英文；后台 CP 仍为英文。新增翻译只需在 `lang_zh.php` 里加一行。
+
+验证：`?lang=zh` 切换后 cookie 生效、页面出现中文；切回 `?lang=en` 完全恢复英文；
+12 个页面 × 2 种语言均 0 PHP 警告；`php -l` 全树 0 失败；英文页面的中文仅来自用户数据与切换条。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -374,6 +406,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | 中文发帖（真实 POST） | `中文发帖测试_😀_中` 标题/正文完整入库，无 `U+FFFD`、无 `?`；预览路径同样正常 |
 | 回复 / 搜索 / 私信 | 真实 HTTP 回复成功、无 `Unknown column`；6 条改写 SQL 解析通过；多种搜索词无报错 |
 | BBCode / 实体解码 | `[url]`/`[list]`/`[code]`/`[php]`/`[b]`/`[email]` 与 `&#20013;` 均正确；发帖转跳页 0 警告 |
+| 中英切换 | cookie 生效，12 页面 × 2 语言 0 警告；en 渲染与原文一致，用户内容不被翻译 |
 | 回归 | 3 种登录态 × 15 页面 0 错误；两树 `php -l` 全通过 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）

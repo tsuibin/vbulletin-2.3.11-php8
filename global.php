@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/admin/php8compat.php';
+require_once __DIR__ . '/admin/lang.php';
+vb_lang_switch();
 error_reporting(7);
 
 if (isset($_GET['explain']) OR isset($_POST['explain'])) {
@@ -338,6 +340,12 @@ $headinclude = '<meta http-equiv="Content-Type" content="text/html; charset=UTF-
 eval("\$headinclude .= \"".gettemplate('headinclude')."\";");
 eval("\$header .= \"".gettemplate('header')."\";");
 eval("\$footer .= \"".gettemplate('footer')."\";");
+
+// language switcher (cookie bblanguage, ?lang=zh|en)
+$vblangbar = '<div align="center" style="font:11px Verdana,Arial,sans-serif;padding:6px 0">'
+  . '<a href="' . htmlspecialchars(vb_lang_url('zh')) . '">中文</a> &nbsp;|&nbsp; '
+  . '<a href="' . htmlspecialchars(vb_lang_url('en')) . '">English</a></div>';
+$footer = $vblangbar . $footer;
 
 // parse other global templates
 

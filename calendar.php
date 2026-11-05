@@ -35,18 +35,18 @@ $today_day = date("j",mktime(date("H"),date("i"),date("s"),date("m"),date("d"),d
 $today_month = date("n",mktime(date("H"),date("i"),date("s"),date("m"),date("d"),date("Y"))+($bbuserinfo['timezoneoffset']-$timeoffset)*3600);
 $today_year = date("Y",mktime(date("H"),date("i"),date("s"),date("m"),date("d"),date("Y"))+($bbuserinfo['timezoneoffset']-$timeoffset)*3600);
 
-$month1name = "January";
-$month2name = "February";
-$month3name = "March";
-$month4name = "April";
-$month5name = "May";
-$month6name = "June";
-$month7name = "July";
-$month8name = "August";
-$month9name = "September";
-$month10name = "October";
-$month11name = "November";
-$month12name = "December";
+$month1name = vbphrase("January");
+$month2name = vbphrase("February");
+$month3name = vbphrase("March");
+$month4name = vbphrase("April");
+$month5name = vbphrase("May");
+$month6name = vbphrase("June");
+$month7name = vbphrase("July");
+$month8name = vbphrase("August");
+$month9name = vbphrase("September");
+$month10name = vbphrase("October");
+$month11name = vbphrase("November");
+$month12name = vbphrase("December");
 
 if ($action == "" or isset($action)==0)
 {

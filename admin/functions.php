@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/php8compat.php';
+require_once __DIR__ . '/lang.php';
 error_reporting(7);
 
 // start prep shutdown function
@@ -1183,6 +1184,10 @@ function gettemplate($templatename,$escape=1,$gethtmlcomments=1) {
     $templatecache[$templatename]=$template;
  }
 
+  // Translate UI text on the template source (before escaping/eval), so user
+  // content interpolated later can never be rewritten by the language layer.
+  $template = vblang_template($template);
+
   if ($escape==1) {
     $template=addslashes($template);
     $template=str_replace("\\'","'",$template);
@@ -1799,7 +1804,7 @@ function vbdate($format,$timestamp) {
   $vb_tz = (float) (is_array($bbuserinfo) ? ($bbuserinfo['timezoneoffset'] ?? 0) : 0);
   $vb_board_offset = (float) ($timeoffset ?? 0);
 
-  return date($format,$timestamp+($vb_tz-$vb_board_offset)*3600);
+  return vblang_date(date($format,$timestamp+($vb_tz-$vb_board_offset)*3600));
 
 }
 

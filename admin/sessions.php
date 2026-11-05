@@ -421,7 +421,7 @@ if (is_array($bbuserinfo)) {
 if ($bbuserinfo['lastvisit']) {
   $bbuserinfo['lastvisitdate'] = vbdate($dateformat." ".$timeformat,$bbuserinfo['lastvisit']);
 } else {
-  $bbuserinfo['lastvisitdate'] = "Never";
+  $bbuserinfo['lastvisitdate'] = vbphrase('Never');
 }
 
 $bbuserinfo['lastactivity']=intval($bbuserinfo['lastactivity']);
