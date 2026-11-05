@@ -342,10 +342,12 @@ eval("\$header .= \"".gettemplate('header')."\";");
 eval("\$footer .= \"".gettemplate('footer')."\";");
 
 // language switcher (cookie bblanguage, ?lang=zh|en)
-$vblangbar = '<div align="center" style="font:11px Verdana,Arial,sans-serif;padding:6px 0">'
+// The footer template closes its own tables; the switcher is appended after it
+// so it can never land inside that markup and break the layout.
+$vblangbar = '<div style="clear:both;text-align:center;font:11px Verdana,Arial,sans-serif;padding:6px 0">'
   . '<a href="' . htmlspecialchars(vb_lang_url('zh')) . '">中文</a> &nbsp;|&nbsp; '
   . '<a href="' . htmlspecialchars(vb_lang_url('en')) . '">English</a></div>';
-$footer = $vblangbar . $footer;
+$footer .= $vblangbar;
 
 // parse other global templates
 
