@@ -60,8 +60,14 @@ if (!function_exists('vbphrase')) {
         return isset($map[$text]) ? $map[$text] : $text;
     }
 
-    /** Translate the text nodes / label attributes of a template source. */
-    function vblang_template($html)
+    /** Translate the text nodes / label attributes of a template source.
+     *
+     * $translate_attrs = false keeps value/alt/title/placeholder untouched.
+     * The admin CP works on plain form echoes, so rewriting a control's value
+     * would change what the form actually submits; those pages must only get
+     * their visible text translated.
+     */
+    function vblang_template($html, $translate_attrs = true)
     {
         if (!is_string($html)) {
             return $html;
@@ -72,7 +78,7 @@ if (!function_exists('vbphrase')) {
         }
 
         static $cache = array();
-        $ck = md5($html);
+        $ck = md5($html) . ($translate_attrs ? 'A' : 'T');
         if (isset($cache[$ck])) {
             return $cache[$ck];
         }
@@ -131,17 +137,19 @@ if (!function_exists('vbphrase')) {
         $html = implode('', $parts);
 
         // Label attributes on buttons / inputs.
-        $html = preg_replace_callback(
-            '/\b(value|alt|title|placeholder)(\s*=\s*")([^"]*)(")/i',
-            function ($m) use ($map) {
-                $key = preg_replace('/\s+/', ' ', trim($m[3]));
-                if (isset($map[$key])) {
-                    return $m[1] . $m[2] . $map[$key] . $m[4];
-                }
-                return $m[0];
-            },
-            $html
-        );
+        if ($translate_attrs) {
+            $html = preg_replace_callback(
+                '/\b(value|alt|title|placeholder)(\s*=\s*")([^"]*)(")/i',
+                function ($m) use ($map) {
+                    $key = preg_replace('/\s+/', ' ', trim($m[3]));
+                    if (isset($map[$key])) {
+                        return $m[1] . $m[2] . $map[$key] . $m[4];
+                    }
+                    return $m[0];
+                },
+                $html
+            );
+        }
 
         if ($stash) {
             $html = strtr($html, $stash);
@@ -163,12 +171,43 @@ if (!function_exists('vbphrase')) {
             'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday',
             'Mon','Tue','Wed','Thu','Fri','Sat','Sun'
         );
-        foreach ($words as $w) {
-            if (isset($map[$w])) {
-                $text = preg_replace('/\b' . preg_quote($w, '/') . '\b/', $map[$w], $text);
+        static $pattern = null;
+        static $pairs = array();
+        if ($pattern === null) {
+            foreach ($words as $w) {
+                if (isset($map[$w])) {
+                    $pairs[$w] = $map[$w];
+                }
+            }
+            if (!$pairs) {
+                $pattern = false;
+            } else {
+                // Longest first, so "January" is tried before "Jan".
+                uksort($pairs, function ($a, $b) {
+                    return strlen($b) - strlen($a);
+                });
+                $pattern = '/\b(' . implode('|', array_map(function ($w) {
+                    return preg_quote($w, '/');
+                }, array_keys($pairs))) . ')\b/';
             }
         }
-        return $text;
+        if ($pattern === false) {
+            return $text;
+        }
+        // One pass instead of 36, and via callback so a translation containing
+        // "$1" or a backslash is inserted literally instead of being parsed.
+        return preg_replace_callback($pattern, function ($m) use ($pairs) {
+            return $pairs[$m[1]];
+        }, $text);
+    }
+
+    /** Normalise a request path so a Location header can never go off-site. */
+    function vb_lang_localpath($uri)
+    {
+        $p = parse_url($uri);
+        $path = isset($p['path']) ? $p['path'] : '/';
+        // "//host" would be read as a protocol-relative URL by the browser.
+        return '/' . ltrim($path, '/');
     }
 
     /** Translate a setting's help text, keyed by setting.varname. */
@@ -200,7 +239,7 @@ if (!function_exists('vbphrase')) {
             parse_str($p['query'], $q);
         }
         $q['lang'] = $lang;
-        return (isset($p['path']) ? $p['path'] : '/') . '?' . http_build_query($q);
+        return vb_lang_localpath($uri) . '?' . http_build_query($q);
     }
 
     /** Handle ?lang=zh|en: set the cookie and redirect to the clean URL. */
@@ -224,7 +263,7 @@ if (!function_exists('vbphrase')) {
         }
         unset($q['lang']);
         $qs = http_build_query($q);
-        $loc = (isset($p['path']) ? $p['path'] : '/') . ($qs ? '?' . $qs : '');
+        $loc = vb_lang_localpath($uri) . ($qs ? '?' . $qs : '');
         header('Location: ' . $loc);
         exit;
     }

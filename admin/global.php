@@ -7,13 +7,25 @@ vb_lang_switch();
 // buffer the whole response and translate it on shutdown, so every admin page
 // follows the bblanguage cookie without touching individual files.
 if (vb_lang_current() !== 'en' && !headers_sent() && function_exists('ob_start')) {
+    // cpheader()/cpfooter() open their own output buffer to gzip the page.
+    // Stacking that under this buffer would hand the compressed bytes to the
+    // translator on shutdown, so gzip is disabled while translating.
+    $GLOBALS['nozip'] = 1;
+    $nozip = 1;
     ob_start();
     register_shutdown_function(function () {
-        if (ob_get_level() > 0) {
-            $html = ob_get_contents();
-            ob_end_clean();
-            echo vblang_template($html);
+        // Flush any nested buffer into ours, then translate the whole page.
+        while (ob_get_level() > 1) {
+            ob_end_flush();
         }
+        if (ob_get_level() < 1) {
+            return;
+        }
+        $html = ob_get_contents();
+        ob_end_clean();
+        // Attributes stay untouched: a translated value would be submitted
+        // back to the CP and stored as Chinese data.
+        echo vblang_template($html, false);
     });
 }
 error_reporting(7);
