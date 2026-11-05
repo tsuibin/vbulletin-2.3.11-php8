@@ -63,6 +63,7 @@ admin/php8compat.php 【新增】PHP 8 兼容层
 | D | 中文 / UTF-8 支持 | 全站显式 `UTF-8` 声明（HTTP 头 + meta）；连接固定 `utf8mb4`；表转 `utf8mb4` |
 | E | 中文发帖乱码（发布链路） | `censortext()` 两处按字节 `chr(173)`/`chr(160)` 替换改为匹配完整 UTF-8 序列 |
 | F | MySQL 8 JOIN 优先级 | 6 处 `FROM a,b LEFT JOIN c ON (...a.col...)` 改为显式 `JOIN ... ON` |
+| G | PHP 7 移除的 `/e` 修饰符 | `bbcodeparse2()` 6 条 + `unhtmlspecialchars()` 1 条改用 `preg_replace_callback`；新增 UTF-8 版 `vb_chr()` |
 | — | 验证 | PHP 8.5.12 + MariaDB 13.0.1 真库端到端回归 |
 
 以下按文件逐项说明。
@@ -296,6 +297,32 @@ WHERE ...
 （无 `Unknown column` / `mysql error`，中文正文完整）；`usercp.php` 不再报错；
 多种搜索词、3 种登录态 × 15 页面回归 0 错误。
 
+### 4.12 PHP 7 移除的 `/e` 修饰符（发帖转跳页的 `Unknown modifier 'e'`）
+
+`admin/functions.php` 有两处依赖 `preg_replace` 的 `/e` 修饰符（PHP 7.0 已移除）：
+
+1. `unhtmlspecialchars()`：用 `/esiU` 的 `preg_replace` 把数字 HTML 实体转成字符。
+   发帖 / 回帖成功后的转跳页会调用它来还原用户名等字段，于是页面直接打印
+   `Warning: preg_replace(): Unknown modifier 'e'`，并且返回值变成 `null`。
+2. `bbcodeparse2()`：PHP4+ 分支的 6 条 BBCode 规则用 `/esiU`，替换串是 PHP 表达式
+   （`createlists(...)` / `checkurl(...)` / `stripbrsfromcode(...)` / `phphighlite(...)`）。
+   一旦出现 `[url]` / `[list]` / `[code]` / `[php]`，整条 `preg_replace` 失败并返回
+   `null`，正文会被清空。
+
+修复：
+
+- 6 条规则去掉 `/e`，改为 `preg_replace_callback` + 显式回调数组
+  `$vb_bbcode_callbacks`（索引 0–5 对应原来的 6 个表达式），其余规则仍走普通
+  `preg_replace`；整体按原顺序逐条应用。
+- `unhtmlspecialchars()` 改为 `preg_replace_callback('/(&#)([0-9]*)(;)/iU', ...)`。
+- 新增 `vb_chr()`：优先 `mb_chr($cp, 'UTF-8')`，无 mbstring 时手工做 UTF-8 编码。
+  原来的 `chr()` 只产生单字节，无法表示 `&#20013;`（U+4E2D 中）。
+
+验证：`unhtmlspecialchars('&#20013;&#25991;')` → `中文`；
+`[url]` / `[url=...]` / `[list]` / `[code]` / `[php]` / `[b]` / `[email]` 均正确渲染；
+真实 HTTP 回帖的转跳页与主题页 0 条 `Unknown modifier` / `Warning`；
+3 种登录态 × 17 页面回归 0 错误。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -346,6 +373,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | UTF-8 中文 | 连接 `utf8mb4`；emoji + 中文写入/读出字节一致，无新增 `U+FFFD`；页面带 HTTP 头与 meta 双声明 |
 | 中文发帖（真实 POST） | `中文发帖测试_😀_中` 标题/正文完整入库，无 `U+FFFD`、无 `?`；预览路径同样正常 |
 | 回复 / 搜索 / 私信 | 真实 HTTP 回复成功、无 `Unknown column`；6 条改写 SQL 解析通过；多种搜索词无报错 |
+| BBCode / 实体解码 | `[url]`/`[list]`/`[code]`/`[php]`/`[b]`/`[email]` 与 `&#20013;` 均正确；发帖转跳页 0 警告 |
 | 回归 | 3 种登录态 × 15 页面 0 错误；两树 `php -l` 全通过 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）
@@ -357,15 +385,13 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 3. 口令为 **md5 无盐**，且 `bbpassword` cookie 直接存 md5 值；会话 hash 为
    `md5(uniqid(microtime()))`。
 4. `xss_clean()` 只替换 `javascript` / `"` / `<` / `>`，防护很弱。
-5. **`/e` 修饰符**（PHP 7 已移除）在 `admin/functions.php` 的 `bbcodeparse2()`
-   （约第 910 行）与 `unhtmlspecialchars()`（约第 2212 行）的 PHP4+ 分支仍可达：
-   会报 `preg_replace(): Unknown modifier 'e'` 并返回空，影响 `[url]` / `[list]` /
-   `[code]` / `[php]` BBCode 解析与 HTML 实体解码。修它需要把表达式数组重写为
-   `preg_replace_callback`，属 BBCode 引擎级改动，**本仓库尚未修复**。
+5. `admin/functions.php` 的 `/e` 修饰符已在 4.12 中改为 `preg_replace_callback`；
+   但 `bbcodeparse2()` 仍是「一串正则顺序替换」的旧实现，嵌套 / 异常 BBCode 的
+   边界行为未做系统性验证。
 6. `admin/config.php` 为占位凭据（`root` / `passwd`），部署时须自行修改。
 7. 安装脚本与 21 个 `upgrade*.php` 无鉴权，必须移出 web root 或在服务器层拦截。
 8. 应用内部大量 `strlen()` / `substr()` / `wordwrap()` 按**字节**处理字符串，对 UTF-8
-   多字节文本仍可能截断或错误换行；BBCode 的 `/e` 问题（第 5 条）同样未修。
+   多字节文本仍可能截断或错误换行。
    另外，历史数据中已变成 `U+FFFD` / `?` 的字符无法自动还原（见 4.9 / 4.10），
    需要重新编辑对应帖子；`censortext()` 修复后新发的内容不会再出现此问题。
 

@@ -774,7 +774,7 @@ function bbcodeparse2($bbcode,$dohtml,$dobbimagecode,$dosmilies,$dobbcode)
   global $DB_site,$wordwrap,$allowdynimg, $bbuserinfo;
 
   static $smilies,$bbcodes;
-  global $regexcreated,$searcharray,$replacearray,$phpversionnum;
+  global $regexcreated,$searcharray,$replacearray,$phpversionnum,$vb_bbcode_callbacks;
 
   if($wordwrap!=0) {
     $bbcode=dowordwrap($bbcode);
@@ -843,14 +843,15 @@ function bbcodeparse2($bbcode,$dohtml,$dobbimagecode,$dosmilies,$dobbcode)
           "vbscript :",
 		  "\\1&#111;&#110;\\2="
         );
+        $vb_bbcode_callbacks = array();
       } else {
         $searcharray = array(
-          "/(\[)(list)(=)(['\"]?)(A|a|I|i|1)(\\4])(.*)(\[\/list)(((=)(\\4)([^\"']*)(\\4]))|(\]))/esiU",
-          "/(\[)(list)(])(.*)(\[\/list\])/esiU",
-          "/(\[)(url)(=)(['\"]?)([^\"'`]*)(\\4])(.*)(\[\/url\])/esiU",
-          "/(\[)(url)(])([^\"`]*)(\[\/url\])/esiU",
-          "/(\[)(code)(])(\r\n)*(.*)(\[\/code\])/esiU",
-          "/(\[)(php)(])(\r\n)*(.*)(\[\/php\])/esiU",
+          "/(\[)(list)(=)(['\"]?)(A|a|I|i|1)(\\4])(.*)(\[\/list)(((=)(\\4)([^\"']*)(\\4]))|(\]))/siU",
+          "/(\[)(list)(])(.*)(\[\/list\])/siU",
+          "/(\[)(url)(=)(['\"]?)([^\"'`]*)(\\4])(.*)(\[\/url\])/siU",
+          "/(\[)(url)(])([^\"`]*)(\[\/url\])/siU",
+          "/(\[)(code)(])(\r\n)*(.*)(\[\/code\])/siU",
+          "/(\[)(php)(])(\r\n)*(.*)(\[\/php\])/siU",
           "/javascript:/si",
           "/about:/si",
           "/vbscript:/si",
@@ -868,6 +869,16 @@ function bbcodeparse2($bbcode,$dohtml,$dobbimagecode,$dosmilies,$dobbcode)
           "about :",
           "vbscript :",
 		  "\\1&#111;&#110;\\2="
+        );
+        // PHP 7 removed the /e modifier. Reproduce the six expression
+        // replacements with explicit callbacks instead of eval-ing code.
+        $vb_bbcode_callbacks = array(
+          0 => function ($m) { return createlists($m[7] ?? '', $m[5] ?? ''); },
+          1 => function ($m) { return createlists($m[4] ?? ''); },
+          2 => function ($m) { return checkurl($m[5] ?? '', $m[7] ?? ''); },
+          3 => function ($m) { return checkurl($m[4] ?? ''); },
+          4 => function ($m) { return stripbrsfromcode($m[5] ?? ''); },
+          5 => function ($m) { return phphighlite($m[5] ?? ''); },
         );
       }  // end version check
 
@@ -907,7 +918,14 @@ function bbcodeparse2($bbcode,$dohtml,$dobbimagecode,$dosmilies,$dobbcode)
     if ($phpversionnum<"4.0.5") {
       $bbcode=str_replace("'", "\'", $bbcode);
     }
-    $bbcode=preg_replace($searcharray, $replacearray, $bbcode);
+    // Apply patterns in order; entries that used /e go through callbacks.
+    foreach ($searcharray as $vb_index => $vb_pattern) {
+      if (isset($vb_bbcode_callbacks[$vb_index])) {
+        $bbcode = preg_replace_callback($vb_pattern, $vb_bbcode_callbacks[$vb_index], $bbcode);
+      } else {
+        $bbcode = preg_replace($vb_pattern, $replacearray[$vb_index], $bbcode);
+      }
+    }
 
     if($dobbimagecode and ($bbuserinfo['userid']==0 or $bbuserinfo['showimages'])) {
       // do [img]xxx[/img]
@@ -2206,6 +2224,28 @@ function makelogincode() {
 }
 
 // ###################### Start un htmlspecialchars #######################
+// UTF-8 aware chr() for numeric HTML entities. PHP 4's chr() returned a
+// single byte, which cannot represent e.g. &#20013; (U+4E2D).
+function vb_chr($codepoint) {
+  $codepoint = (int) $codepoint;
+  if ($codepoint < 0 or $codepoint > 0x10FFFF) {
+    return '';
+  }
+  if (function_exists('mb_chr')) {
+    return mb_chr($codepoint, 'UTF-8');
+  }
+  if ($codepoint < 0x80) {
+    return chr($codepoint);
+  }
+  if ($codepoint < 0x800) {
+    return chr(0xC0 | ($codepoint >> 6)) . chr(0x80 | ($codepoint & 0x3F));
+  }
+  if ($codepoint < 0x10000) {
+    return chr(0xE0 | ($codepoint >> 12)) . chr(0x80 | (($codepoint >> 6) & 0x3F)) . chr(0x80 | ($codepoint & 0x3F));
+  }
+  return chr(0xF0 | ($codepoint >> 18)) . chr(0x80 | (($codepoint >> 12) & 0x3F)) . chr(0x80 | (($codepoint >> 6) & 0x3F)) . chr(0x80 | ($codepoint & 0x3F));
+}
+
 function unhtmlspecialchars($chars) {
   if (floor((float) phpversion())<4) {
     //php3
@@ -2215,7 +2255,9 @@ function unhtmlspecialchars($chars) {
     $chars=stripslashes($temp);
   } else {
     //php4
-    $chars=preg_replace("/(&#)([0-9]*)(;)/esiU","chr(intval('\\2'))",$chars);
+    $chars=preg_replace_callback('/(&#)([0-9]*)(;)/iU', function ($m) {
+      return vb_chr($m[2]);
+    }, $chars);
   }
 
   $chars=str_replace("&gt;",">",$chars);
