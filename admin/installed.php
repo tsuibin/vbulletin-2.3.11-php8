@@ -512,7 +512,7 @@ $query[]="CREATE TABLE attachment (
    userid int(10) unsigned DEFAULT '0' NOT NULL,
    dateline int(10) unsigned DEFAULT '0' NOT NULL,
    filename varchar(100) NOT NULL,
-   filedata mediumtext NOT NULL,
+   filedata longblob NOT NULL,
    visible smallint(5) unsigned DEFAULT '0' NOT NULL,
    counter smallint(5) unsigned DEFAULT '0' NOT NULL,
    PRIMARY KEY (attachmentid)
@@ -554,7 +554,7 @@ $explain[]="Creating table calendar_events";
 
 $query[]="CREATE TABLE customavatar (
    userid int(10) unsigned DEFAULT '0' NOT NULL,
-   avatardata mediumtext NOT NULL,
+   avatardata longblob NOT NULL,
    dateline int(10) unsigned DEFAULT '0' NOT NULL,
    filename CHAR(100) NOT NULL,
    PRIMARY KEY (userid)

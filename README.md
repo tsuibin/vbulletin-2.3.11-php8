@@ -212,6 +212,8 @@ vBulletin 2.3.11 是 `windows-1252`（单字节）时代的应用，模板里**�
 - **已有数据库需自行转换**（源码改动不会改已存在的数据）：
   `ALTER TABLE <t> CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
   对所有表执行，并 `ALTER DATABASE ... CHARACTER SET utf8mb4`。转换前请先备份。
+  **转换前必须先把两个二进制列改成 BLOB**（`attachment.filedata`、`customavatar.avatardata`），
+  否则图片会被替换成 `?` 而损坏，详见 4.15。
   已转成 `U+FFFD` 的历史字符无法自动还原，需重新编辑对应帖子。
 
 验证：连接字符集 `utf8mb4`；新增 emoji（`F0 9F 98 80`）与中文（`E6 B5 8B E8 AF 95`）
@@ -372,6 +374,27 @@ Page load: 0.0138 s | Template load: 0.0019 s
 - 输出点：`dovars()` 在 gzip 与 `Content-Length` 之前注入，保证压缩后长度正确；后台 CP 由 `cpfooter()` 输出。
 - 文案走 `vbphrase()`，中英自动切换；无模板/数据库改动。
 
+### 4.15 附件/头像二进制列（utf8mb4 转换的坑）
+
+`attachment.filedata` 与 `customavatar.avatardata` 在 vB 2.3 里是 `mediumtext`。MySQL 4 时代用 latin1，
+二进制文件按字节存进 text 列没有问题；但 `CONVERT TO CHARACTER SET utf8mb4` 后，列会按 UTF-8 校验，
+文件中的非法字节被逐个替换成 `?`（`0x3F`）。
+
+实测：一个 77,404 字节的 PNG，**33,804 字节被替换**，首字节 `89` 变成 `3F`，签名从
+`89504E470D0A1A0A` 变成 `3F504E470D0A1A0A`，浏览器因此提示「图片存在错误」。
+
+修复：
+
+```sql
+ALTER TABLE attachment   MODIFY filedata   LONGBLOB NOT NULL;
+ALTER TABLE customavatar MODIFY avatardata LONGBLOB NOT NULL;
+```
+
+安装器已同步为 `longblob`。BLOB 列不参与字符集转换，后续再 `CONVERT TO CHARACTER SET` 也不会破坏它。
+
+注意：**已经损坏的附件无法恢复**，需要在帖子里重新上传。修复后做过逐字节验证：
+源文件、库中 `filedata`、`attachment.php` 下载三者 md5 一致，`file` 识别为 `PNG image data, 64 x 64`。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -425,6 +448,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | BBCode / 实体解码 | `[url]`/`[list]`/`[code]`/`[php]`/`[b]`/`[email]` 与 `&#20013;` 均正确；发帖转跳页 0 警告 |
 | 中英切换 | cookie 生效，12 页面 × 2 语言 0 警告；897 条模板文案全量翻译；en 渲染与原文一致，用户内容不被翻译 |
 | 加载计时 | 前台 11 页面 × 中英、后台 CP 均输出页面/模板耗时；模板耗时 < 页面耗时 |
+| 附件二进制 | `filedata`/`avatardata` 改为 BLOB；上传→入库→下载 md5 与源文件一致 |
 | 回归 | 3 种登录态 × 15 页面 0 错误；两树 `php -l` 全通过 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）
