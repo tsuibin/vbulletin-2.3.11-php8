@@ -395,6 +395,14 @@ ALTER TABLE customavatar MODIFY avatardata LONGBLOB NOT NULL;
 注意：**已经损坏的附件无法恢复**，需要在帖子里重新上传。修复后做过逐字节验证：
 源文件、库中 `filedata`、`attachment.php` 下载三者 md5 一致，`file` 识别为 `PNG image data, 64 x 64`。
 
+**默认内联显示图片**：vB 2.3 默认把附件图片渲染成下载链接。要默认显示，需要两处同时为 1：
+
+- `setting.viewattachedimages = 1`（附件图片内联）
+- `forum.allowimages = 1`（版块允许 `[img]`）
+
+并且要同步到**编译后的 options 模板**（`template.title='options'` 里的 `$viewattachedimages = "1";`）——
+只改 `setting` 表运行时不生效。安装器已默认开启这两项。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -449,6 +457,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | 中英切换 | cookie 生效，12 页面 × 2 语言 0 警告；897 条模板文案全量翻译；en 渲染与原文一致，用户内容不被翻译 |
 | 加载计时 | 前台 11 页面 × 中英、后台 CP 均输出页面/模板耗时；模板耗时 < 页面耗时 |
 | 附件二进制 | `filedata`/`avatardata` 改为 BLOB；上传→入库→下载 md5 与源文件一致 |
+| 图片内联 | `viewattachedimages=1` + `forum.allowimages=1`；帖子渲染为 `<img src="attachment.php…">`，不再需点击 |
 | 回归 | 3 种登录态 × 15 页面 0 错误；两树 `php -l` 全通过 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）

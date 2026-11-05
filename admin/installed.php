@@ -1093,7 +1093,7 @@ $explain[]="Adding Admin Util Data";
 
 $query[]="INSERT INTO forum VALUES (1, 0, 'Main Category', 'Main Category Description', '1', '1', '0', '0', '', '0', '0', '0', '0', '', '', '0', '0', '0', '0', '0', '0', '0', '-1', '1,-1', '0', '1', '0')";
 $explain[]="Adding demo category";
-$query[]="INSERT INTO forum VALUES (2, 0, 'Main Forum', 'Main Forum Description', '1', '1', '0', '0', '', '0', '1', '1', '30', '', '', '0', '0', '1', '0', '0', '1', '1', '1', '2,1,-1', '1', '1', '0')";
+$query[]="INSERT INTO forum VALUES (2, 0, 'Main Forum', 'Main Forum Description', '1', '1', '0', '0', '', '0', '1', '1', '30', '', '', '0', '0', '1', '1', '0', '1', '1', '1', '2,1,-1', '1', '1', '0')";
 $explain[]="Adding demo forum";
 
 $query[]="INSERT INTO icon VALUES (NULL,'Post','images/icons/icon1.gif')";
@@ -1544,7 +1544,7 @@ $DB_site->query("INSERT INTO setting VALUES (NULL,26,'Display Height','numavatar
 $DB_site->query("INSERT INTO setting VALUES (NULL,26,'Display Width','numavatarswide','5','How many columns of avatars do you wish to display to the user when selecting an avatar?','',8)");
 $DB_site->query("INSERT INTO setting VALUES (NULL,27,'Maximum File Size','maxattachsize','102400','Specify the maximum size in bytes that an upload may be. Set this value to 0 to enable any sized uploads.\n\n1 KB = 1024 bytes\n1 MB = 1048576 bytes','',1)");
 $DB_site->query("INSERT INTO setting VALUES (NULL,27,'Valid Extensions','attachextensions','gif jpg png txt zip bmp jpeg','Valid extensions that uploads may have. Separate each item with a space.\n\nFor each extension, you should have a file in the /images/attach/ folder called xxx.gif where xxx is the extension of the file. This allows you to have an icon for each file type.','',2)");
-$DB_site->query("INSERT INTO setting VALUES (NULL,27,'View Images','viewattachedimages','0','Do you wish to display attached images in the threads? Select no to just generate a link to download the image.','yesno',3)");
+$DB_site->query("INSERT INTO setting VALUES (NULL,27,'View Images','viewattachedimages','1','Do you wish to display attached images in the threads? Select no to just generate a link to download the image.','yesno',3)");
 $DB_site->query("INSERT INTO setting VALUES (NULL,27,'Maximum Image Width','maxattachwidth','0','Set this to the maximum width attached images (jpg and gif) may have. Set it to 0 to not limit the width.','',4)");
 $DB_site->query("INSERT INTO setting VALUES (NULL,27,'Maximum Image Height','maxattachheight','0','Set this to the maximum height attached images (jpg and gif) may have. Set it to 0 to not limit the height.','',5)");
 $DB_site->query("INSERT INTO setting VALUES (NULL,27,'Allow Duplicate Images','allowduplicates','1','Setting this to NO will cause the post to refer to the previous existence of the attachment instead of adding another copy of it to the database. It only checks for attachments posted by the user that is making the post.','yesno',6)");
