@@ -433,6 +433,7 @@ return array(
     'PHP' => 'PHP',
     'PHP CODE' => 'PHP 代码',
     'Page' => '页',
+    'Page load: %s s | Template load: %s s' => '页面加载：%s 秒 ｜ 模板加载：%s 秒',
     'Parent/Guardian Email' => '父母/监护人邮箱',
     'Parent/Guardian Full Name:' => '父母/监护人全名：',
     'Password Recovery Form' => '密码找回表单',

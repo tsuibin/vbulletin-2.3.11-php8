@@ -30,6 +30,12 @@ if ($gzipoutput and !headers_sent() and function_exists("ob_start") and function
 function cpfooter() {
 global $gzipoutput,$nozip,$level,$HTTP_ACCEPT_ENCODING;
 
+$vb_tpl_time = isset($GLOBALS['vb_templatetime']) ? (float) $GLOBALS['vb_templatetime'] : 0.0;
+$vb_page_time = !empty($GLOBALS['vb_pagestart']) ? microtime(true) - (float) $GLOBALS['vb_pagestart'] : 0.0;
+echo '<div align="center" style="font:10px Verdana,Arial,sans-serif;color:#888;padding:6px 0">'
+  . sprintf(vbphrase('Page load: %s s | Template load: %s s'), number_format($vb_page_time, 4), number_format($vb_tpl_time, 4))
+  . '</div>';
+
 ?>
 </BODY></HTML>
 <?php

@@ -8,6 +8,12 @@
  * run. It is loaded with require_once by every PHP file in the tree.
  */
 
+// Request timing: bootstrap start + accumulated template loading time.
+if (!isset($GLOBALS['vb_pagestart'])) {
+    $GLOBALS['vb_pagestart'] = microtime(true);
+    $GLOBALS['vb_templatetime'] = 0.0;
+}
+
 if (!function_exists('vb_ereg_pattern')) {
 
     // ---------------------------------------------------------------------

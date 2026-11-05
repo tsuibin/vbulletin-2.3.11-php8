@@ -654,6 +654,20 @@ function dovars($newtext, $sendheader = 1)
 		}
 	}
 
+	// Page / template load time, shown at the bottom of the page.
+	if (is_string($newtext)) {
+		$vb_tpl_time = isset($GLOBALS['vb_templatetime']) ? (float) $GLOBALS['vb_templatetime'] : 0.0;
+		$vb_page_time = !empty($GLOBALS['vb_pagestart']) ? microtime(true) - (float) $GLOBALS['vb_pagestart'] : 0.0;
+		$vb_timer_html = '<div align="center" style="font:10px Verdana,Arial,sans-serif;color:#888;padding:6px 0">'
+			. sprintf(vbphrase('Page load: %s s | Template load: %s s'), number_format($vb_page_time, 4), number_format($vb_tpl_time, 4))
+			. '</div>';
+		if (stripos($newtext, '</body>') !== false) {
+			$newtext = preg_replace('/<\/body>/i', $vb_timer_html . '</body>', $newtext, 1);
+		} else {
+			$newtext .= $vb_timer_html;
+		}
+	}
+
 	if ($gzipoutput and !headers_sent())
 	{
 		$newtext = gzipoutput($newtext, $gziplevel);
@@ -1149,6 +1163,8 @@ function cachetemplates($templateslist) {
   // $templateslist: comma delimited list
   global $templatecache,$DB_site,$templatesetid,$loadmaxusers,$loadbirthdays;
 
+  $vb_tpl_t0 = microtime(true);
+
   // add in sql info
   //$templateslist=str_replace(",","' OR title='",$templateslist);
   $templateslist=str_replace(',', "','", vb_escape($templateslist));
@@ -1169,12 +1185,17 @@ function cachetemplates($templateslist) {
   unset($temp);
   $DB_site->free_result($temps);
 
+  if (isset($GLOBALS['vb_templatetime'])) {
+    $GLOBALS['vb_templatetime'] += microtime(true) - $vb_tpl_t0;
+  }
 }
 
 // ###################### Start gettemplate #######################
 function gettemplate($templatename,$escape=1,$gethtmlcomments=1) {
   // gets a template from the db or from the local cache
   global $templatecache,$DB_site,$templatesetid,$addtemplatename;
+
+  $vb_tpl_t0 = microtime(true);
 
   if (isset($templatecache[$templatename])) {
     $template=$templatecache[$templatename];
@@ -1187,6 +1208,10 @@ function gettemplate($templatename,$escape=1,$gethtmlcomments=1) {
   // Translate UI text on the template source (before escaping/eval), so user
   // content interpolated later can never be rewritten by the language layer.
   $template = vblang_template($template);
+
+  if (isset($GLOBALS['vb_templatetime'])) {
+    $GLOBALS['vb_templatetime'] += microtime(true) - $vb_tpl_t0;
+  }
 
   if ($escape==1) {
     $template=addslashes($template);
