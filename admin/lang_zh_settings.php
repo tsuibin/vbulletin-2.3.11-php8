@@ -7,7 +7,8 @@ return array(
     'WOLguests' => '在「在线用户」中显示访客活动？',
     'WOLrefresh' => '「在线用户」自动刷新间隔（秒）。0 表示不刷新。',
     'WOLresolve' => '是否对有权限者解析 IP 地址？会拖慢「在线用户」的显示。',
-    'addheaders' => '部分 Web 服务器组合下此选项无效，因此默认关闭；某些 IIS 环境可能需要开启。开启后会发送 200 OK HTTP 头。',
+    'addheaders' => '部分 Web 服务器组合下此选项无效，因此默认关闭；某些 IIS 环境可能需要开启。</p>
+<p>开启后会发送 200 OK HTTP 头。',
     'address' => '公司地址，COPPA 表单会寄往此处。',
     'addtemplatename' => '在每个渲染的模板前后加上模板名，便于调试和分析 HTML；生产环境请关闭以节省带宽。',
     'allowchangestyles' => '允许用户在注册或编辑选项时选择风格。设为「否」将禁用该选项，强制使用指定风格。',
@@ -23,13 +24,15 @@ return array(
     'avatarallowupload' => '达到帖子数要求的用户是否可以从本机上传自定义头像？',
     'avatarallowwebsite' => '达到帖子数要求的用户是否可以从其他网站引用自定义头像？',
     'avatarcustomposts' => '用户使用自定义头像所需的最少帖子数。',
-    'avatarenabled' => '启用/禁用头像功能。头像是显示在帖子用户名下方和用户资料页中的小图片。',
+    'avatarenabled' => '启用/禁用头像功能。<br><br>头像是显示在帖子用户名下方和用户资料页中的小图片。',
     'avatarmaxdimension' => '自定义头像的最大宽高（像素）。',
     'avatarmaxsize' => '头像文件的最大大小（字节）。1 KB = 1024 字节，1 MB = 1048576 字节。',
     'banemail' => '邮箱封禁列表：可禁止特定邮箱注册。封禁某个邮箱请填完整地址（如 waldo@whereiswaldo.com）；封禁整个域名（如 hotmail）只填域名（如 hotmail.com）即可。多个邮箱用空格分隔。',
     'banip' => 'IP 封禁列表：可禁止指定 IP 注册和发帖。填写完整 IP（如 243.21.31.7）或部分 IP（如 243.21.31）。系统会从 IP 开头匹配：填 243.21.31 时，IP 为 243.21.31.5 的人无法注册；填 243.21 时，IP 为 243.21.3.44 的人也无法注册。因此请尽量精确。多个 IP 用空格分隔。',
-    'bbactive' => '有时你可能需要在维护、升级等期间关闭论坛。关闭后访客会看到「论坛暂时不可用」的提示，管理员仍可正常浏览。这是论坛的总开关；各用户组的权限可在用户权限区域单独设置。',
-    'bbclosedreason' => '论坛关闭时显示的文字。注意：即使对公众关闭，管理员仍可照常浏览论坛。',
+    'bbactive' => '有时你可能需要在维护、升级等期间关闭论坛。关闭后访客会看到「论坛暂时不可用」的提示。<b>管理员仍可正常浏览论坛</b></p>
+<p>这是论坛的总开关；各用户组的权限可在用户权限区域单独设置。',
+    'bbclosedreason' => '论坛关闭时显示的文字。</p>
+<p>注意：即使对公众关闭，管理员仍可照常浏览论坛。',
     'bbtitle' => '论坛标题，会显示在每个页面的标题栏。',
     'bburl' => '论坛网址（结尾不要带「/」），也不要包含「/index.php」。例如：http://www.example.com/forum',
     'calStart' => '选择日历中每周的起始日。用户也可在个人资料中按本地习惯修改。',
@@ -43,7 +46,7 @@ return array(
     'calformat2' => '用户未填写出生年份时，资料中显示的生日格式。不要包含年份代码。',
     'calshowbirthdays' => '是否在日历上显示每位用户的生日？设为「否」则只在有生日的日期显示链接。',
     'caltitlelength' => '主日历中标题截断长度。0 表示不截断。',
-    'censorwords' => '在此填写要屏蔽的词。用空格分隔，不要用逗号。例如填「dog cat boy」而不是「dog, cat, boy」。填「dog」会屏蔽所有包含「dog」的词（如 dogma 会显示为「***ma」）。若要精确匹配，可用花括号包裹，如 {dog}，此时 dogma 保持原样而 dog 显示为「***」。因此列表可以写成：cat {dog} {barn} barn。不要使用引号，精确匹配必须用花括号而不是圆括号。本字段最多 250 个字符。',
+    'censorwords' => '在此填写要屏蔽的词。用空格分隔，不要用逗号。例如填「dog cat boy」而不是「dog, cat, boy」。填「dog」会屏蔽所有包含「dog」的词（如 dogma 会显示为「***ma」）。若要更精确，可以只屏蔽完整单词：把词放进花括号，如 {dog}，此时 dogma 保持原样而 dog 显示为「***」。因此列表可以写成：cat {dog} {barn} barn<br>不要使用引号，精确匹配必须用花括号而不是圆括号。<br>本字段最多 250 个字符。',
     'checknewpm' => '选择「是」后，每次用户打开页面都会检查私信库，并显示新私信提示。',
     'companyname' => '公司名称，COPPA 需要。',
     'contactuslink' => '联系本站的链接，可以直接是 mailto:webmaster@example.com，也可以是你自己的表单。显示在每个页面底部。',
@@ -53,13 +56,19 @@ return array(
     'copyrighttext' => '插入到页面页脚的版权文字。',
     'ctAdmin' => '是否允许管理员/版主修改头衔，而不受帖子数或注册时长限制？需先启用用户头衔。',
     'ctCensorMod' => '是否让版主不受屏蔽词限制？如果你屏蔽了版主头衔中的词（如「moderator」），建议设为「是」，因为版主默认使用自定义头衔，会被屏蔽。',
-    'ctCensorWords' => '在此填写要屏蔽的词。用空格分隔，不要用逗号。例如填「dog cat boy」而不是「dog, cat, boy」。填「dog」会屏蔽所有包含「dog」的词（如 dogma 显示为「***ma」）。若要精确匹配，用花括号包裹，如 {dog}，此时 dogma 保持原样而 dog 显示为「***」。列表可写成：cat {dog} {barn} barn。不要使用引号，精确匹配请用花括号而非圆括号。',
+    'ctCensorWords' => '在此填写要屏蔽的词。用空格分隔，不要用逗号。例如填「dog cat boy」而不是「dog, cat, boy」。填「dog」会屏蔽所有包含「dog」的词（如 dogma 显示为「***ma」）。若要只屏蔽完整单词，把词放进花括号，如 {dog}，此时 dogma 保持原样而 dog 显示为「***」。列表可写成：cat {dog} {barn} barn<br>不要使用引号，精确匹配请用花括号而非圆括号。',
     'ctDays' => '用户使用自定义头衔前必须注册的天数。',
     'ctEitherOr' => '用户是否必须同时满足上面的帖子数和注册天数？选择「否」则满足任一条件即可。例如用户注册 1 年但只有 20 帖，若上面设置 100 帖和 1 年，选择「否」时该用户可以使用头衔。',
     'ctEnable' => '启用自定义用户头衔？',
     'ctMaxChars' => '用户自定义头衔允许的最大长度。',
     'ctPosts' => '用户使用自定义头衔所需的最少帖子数。',
-    'dateformat' => '页面日期的显示格式。参见 http://www.php.net/manual/function.date.php3 示例：美式（如 04-25-98）- m-d-y；美式全称（如 April 25th, 1998）- F jS, Y；欧式（如 25-04-98）- d-m-Y；欧式全称（如 25th April 1998）- jS F Y',
+    'dateformat' => '页面日期的显示格式。</p>
+<p>参见：<a href="http://www.php.net/manual/function.date.php3" target=_blank>http://www.php.net/manual/function.date.php3</a></p>
+<p>示例：<br>
+美式（如 04-25-98）- m-d-y<br>
+美式全称（如 April 25th, 1998）- F jS, Y<br>
+欧式（如 25-04-98）- d-m-Y<br>
+欧式全称（如 25th April 1998）- jS F Y',
     'displayemails' => '允许公开查看邮箱地址。',
     'displayloggedin' => '是否在首页显示已登录的活跃会员？显示最近 {cookie 超时时间} 秒内活跃的用户。',
     'editthreadtitlelimit' => '主题作者可以编辑主题标题的时限（分钟）。',
@@ -67,12 +76,14 @@ return array(
     'enableaccess' => '访问权限掩码是管理版块权限的简便方式，但会在多数页面增加查询。若不使用，建议关闭。',
     'enablebanning' => '封禁功能可阻止特定 IP 和邮箱注册及发帖。',
     'enablecensor' => '可以对论坛中的某些词进行屏蔽，被屏蔽的词会替换成星号，影响所有标题和内容。',
-    'enableemail' => '启用邮件功能：发送给朋友，以及给发帖人和版主的邮件通知。别忘了从 forumdisplay、newreply、newtopic、editpost 模板中删除对应链接。也可在用户权限区域为个别用户组关闭「发送给朋友」。',
+    'enableemail' => '启用邮件功能：发送给朋友，以及给发帖人和版主的邮件通知。别忘了从 <i>forumdisplay、newreply、newtopic</i> 与 <i>editpost</i> 模板中删除对应链接<br><br>也可在 <a href="usergroup.php?s=$session[sessionhash]&amp;action=modify" target="_blank">用户权限区域</a>为个别用户组关闭「发送给朋友」。',
     'enablefloodcheck' => '启用后可防止用户连续灌水：限制两次发帖的最小间隔。例如设为 60 秒，则用户发帖后 60 秒内不能再次发帖。管理员和版主不受限制。',
     'enablememberlist' => '启用会员列表功能？用户可查看注册用户列表，并（可选）在其中搜索。',
     'enablepms' => '启用后会给首页带来一定性能开销，也可能并不是你想要的功能。',
-    'enablesearches' => '允许在论坛内搜索帖子。该功能较耗服务器资源，可考虑关闭。若要完全禁用搜索，请删除 searchintro 模板中的相应选项。',
-    'faxnumber' => '公司传真号，COPPA 表单会传真到此号码。可参考 http://www.efax.com/',
+    'enablesearches' => '允许在论坛内搜索帖子。该功能较耗服务器资源，可考虑关闭。</p>
+<p>若要完全禁用所有版块的搜索，请删除 searchintro 模板中的相应选项。',
+    'faxnumber' => '公司传真号，COPPA 表单会传真到此号码。</p>
+<p>可参考 <a href="http://www.efax.com/" target=_blank>http://www.efax.com/</a>',
     'floodchecktime' => '防灌水检查的时间（秒）。建议 60。只填数字。',
     'forumdisplaydepth' => '版块页显示子版块时的层级深度。出于性能考虑不要设得太大。',
     'forumhomedepth' => '首页显示的版块层级深度。出于性能考虑，不要设得太大。',
@@ -113,7 +124,7 @@ return array(
     'ontext' => '表示「开启」的文字，用于让代码与语言无关。用于帖子中的 vB 代码 / HTML 代码 开/关 显示。',
     'pagenavpages' => '在主题（或版块）的分页链接中，当前页两侧各显示多少页。设为 0 表示显示全部页码。',
     'pmcancelkill' => '当用户在消息跟踪中「取消」消息时，是否彻底删除该消息？警告：选择「是」可能会让已收到邮件通知的用户困惑。',
-    'pmcancelledword' => '在消息跟踪中，被「取消」的消息标题前会加上这个词（可使用 HTML）。',
+    'pmcancelledword' => '在 <i>消息跟踪</i> 中，被「取消」的消息标题前会加上这个词（可使用 HTML）。',
     'pmfloodtime' => '私信防灌水：两次发送私信之间的最短间隔，防止单个用户快速大量发信。设为 0 表示不限制。',
     'pmmaxchars' => '私信允许的最大字符数。设为 0 表示不限制。',
     'pmquota' => '用户最多可保存的私信数量。0 表示不限制。',
@@ -123,9 +134,10 @@ return array(
     'privacyurl' => '隐私声明网址（如果有）。',
     'privallowicons' => '允许私信使用标准消息图标。',
     'regimagecheck' => '启用后，注册时会向新用户显示随机验证码图片，用户需输入图中内容以确认不是自动程序。需要服务器启用 GD。',
-    'registereddateformat' => '用于格式化帖子中显示的注册日期（主题左侧用户名下方的注册时间）。参见 http://www.php.net/manual/function.date.php3',
+    'registereddateformat' => '用于格式化帖子中显示的注册日期。主题列表左侧、用户名和头衔下方会显示注册时间。</p>
+<p>参见：<a href="http://www.php.net/manual/function.date.php3" target=_blank>http://www.php.net/manual/function.date.php3</a>',
     'requireuniqueemail' => '默认要求每个注册用户的邮箱唯一，即两个用户不能使用同一邮箱。取消勾选「不要求唯一邮箱」可关闭此限制。',
-    'safeupload' => '若服务器 PHP 启用了安全模式限制，请选择「是」。',
+    'safeupload' => '若服务器 PHP 启用了 <b>安全模式</b>限制，请选择「是」。',
     'searchfloodtime' => '用户两次搜索之间必须间隔的最短时间（秒）。设为 0 表示不限制。',
     'searchperpage' => '搜索结果每页显示的条目数。',
     'secureemail' => '当「显示邮箱地址」为「是」时，邮箱如何显示？设为「是」则必须填写在线表单才能发信，从而隐藏收件地址；设为「否」则直接显示邮箱地址。',
@@ -139,15 +151,20 @@ return array(
     'showvotes' => '主题需要多少票后才显示投票结果？',
     'smcolumns' => '启用可点击表情后，每行显示多少个表情？',
     'smtotal' => '启用可点击表情后，屏幕上先显示多少个表情，用户再点击「更多」查看其余。',
-    'spellchecklang' => '拼写检查功能使用的语言（由 Spellchecker.net 提供）。若不使用该功能，应从模板中移除。',
+    'spellchecklang' => '拼写检查功能使用的语言，由 <a href="http://www.spellchecker.net/" target=_blank>Spellchecker.net</a> 提供。若不使用该功能，应从模板中移除。',
     'stickythreadprefix' => '设为「置顶」的主题标题前缀，这类主题总显示在列表顶部（可使用 HTML）。',
     'stopshouting' => '把全大写标题改为仅首字母大写，防止用户在标题中「大喊」。使用不同字符集的国际论坛建议关闭，可能引发问题。',
     'templateversion' => '不要修改！',
-    'timeformat' => '页面时间的显示格式。参见 http://www.php.net/manual/function.date.php3 示例：12 小时制（如 11:15 PM）- h:i A；24 小时制（如 23:15）- H:i',
+    'timeformat' => '页面时间的显示格式。</p>
+<p>参见：<a href="http://www.php.net/manual/function.date.php3" target=_blank>http://www.php.net/manual/function.date.php3</a></p>
+<p>示例：<br>
+12 小时制（如 11:15 PM）- h:i A<br>
+24 小时制（如 23:15）- H:i',
     'timeoffset' => '服务器相对 GMT 的时差（小时）。请选择最合适的一项。',
-    'tmppath' => '若服务器运行在 safe_mode 下，需指定一个权限为 777 的临时上传目录。文件入库后会被删除。注意：目录名后不要带结尾的「/」。',
+    'tmppath' => '若服务器运行在 safe_mode 下，需指定一个权限为 777 的临时上传目录，所有文件入库后都会从该目录删除。<br><b>注意：</b>目录名后不要带结尾的「/」。',
     'updatelastpost' => '投票时是否更新主题的最后发表时间（从而把主题顶到版块顶部）。',
-    'usecoppa' => '启用 COPPA 注册流程，符合 COPPA 法律：13 岁以下儿童发帖前须获得父母同意。详见 http://www.ftc.gov/opa/1999/10/childfinal.htm',
+    'usecoppa' => '启用 COPPA 注册流程，符合 COPPA 法律：13 岁以下儿童发帖前须获得父母同意。关于该法律的更多说明见：<br>
+<a href="http://www.ftc.gov/opa/1999/9910/childfinal.htm">http://www.ftc.gov/opa/1999/10/childfinal.htm</a>',
     'useforumjump' => '是否在页面使用「版块跳转」下拉菜单？若 MySQL 已优化但仍有效能问题，可关闭此选项以减少查询。',
     'usehotthreads' => '热门图标表示活动频繁的主题，图标会显示为着火的文件夹动画。',
     'usememberlistadvsearch' => '允许在会员列表中使用高级搜索。',
