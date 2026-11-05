@@ -22,6 +22,8 @@ class DB_Sql_vb {
   public $errdesc    = "";
   public $errno   = 0;
   public $reporterror = 1;
+  // mysqli_error() equivalent; assigned by geterrdesc().
+  public $error = "";
 
   public $server   = "localhost";
   public $port     = 5432;
@@ -34,14 +36,11 @@ class DB_Sql_vb {
   public $appname  = "vBulletin";
   public $appshortname = "vBulletin (cp)";
 
-  // Primary keys of the tables the board writes with REPLACE INTO. MySQL's
-  // REPLACE is delete-then-insert; PostgreSQL spells the same thing
-  // INSERT ... ON CONFLICT (pk) DO UPDATE. Keep this list in step with the
-  // schema if more REPLACE INTO statements are ever added.
-  public $primary_keys = array(
-    'searchindex' => array('wordid', 'postid'),
-    'adminutil'   => array('title'),
-  );
+  // Primary keys of the tables the board writes with REPLACE INTO are looked up
+  // in the catalog at run time (see conflict_target()), because MySQL's REPLACE
+  // only upserts when the table actually has a unique key -- searchindex has
+  // none, and then REPLACE degrades to a plain INSERT.
+  public $key_cache = array();
 
   // Cache of information_schema lookups: table => array(position => array(name, serial))
   public $column_cache = array();
@@ -262,19 +261,22 @@ class DB_Sql_vb {
     global $technicalemail, $bbuserinfo, $scriptpath, $_SERVER;
 
     if ($this->reporterror == 1) {
-      $message = "Database error in " . $this->appname . " $GLOBALS[templateversion]:\n\n$msg\n";
+      $version = isset($GLOBALS['templateversion']) ? $GLOBALS['templateversion'] : '';
+      $bburl   = isset($GLOBALS['bburl']) ? $GLOBALS['bburl'] : '';
+      $bbtitle = isset($GLOBALS['bbtitle']) ? $GLOBALS['bbtitle'] : 'vBulletin';
+      $message = "Database error in " . $this->appname . " $version:\n\n$msg\n";
       $message .= "pgsql error: " . $this->errdesc . "\n\n";
       $message .= "pgsql error number: " . $this->errno . "\n\n";
       $message .= "Date: " . date("l dS of F Y h:i:s A") . "\n";
-      $message .= "Script: $GLOBALS[bburl]" . (($scriptpath) ? $scriptpath : $_SERVER['REQUEST_URI']) . "\n";
+      $message .= "Script: $bburl" . ((isset($scriptpath) && $scriptpath) ? $scriptpath : (isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '')) . "\n";
       $message .= "Referer: " . (isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '') . "\n";
 
       if ($technicalemail) {
         @mail($technicalemail, $this->appshortname . " Database error!", $message, "From: $technicalemail");
       }
 
-      echo "<html><head><title>$GLOBALS[bbtitle] Database Error</title><style>P,BODY{FONT-FAMILY:tahoma,arial,sans-serif;FONT-SIZE:11px;}</style><body>\n\n<!-- $message -->\n\n";
-      echo "</table></td></tr></table></form>\n<blockquote><p>&nbsp;</p><p><b>There seems to have been a slight problem with the $GLOBALS[bbtitle] database.</b><br>\n";
+      echo "<html><head><title>$bbtitle Database Error</title><style>P,BODY{FONT-FAMILY:tahoma,arial,sans-serif;FONT-SIZE:11px;}</style><body>\n\n<!-- $message -->\n\n";
+      echo "</table></td></tr></table></form>\n<blockquote><p>&nbsp;</p><p><b>There seems to have been a slight problem with the $bbtitle database.</b><br>\n";
       echo "Please try again by pressing the <a href=\"javascript:window.location=window.location;\">refresh</a> button in your browser.</p>";
       echo "An E-Mail has been dispatched to our <a href=\"mailto:$technicalemail\">Technical Staff</a>, who you can also contact if the problem persists.</p>";
       echo "<p>We apologise for any inconvenience.</p>";
@@ -308,6 +310,7 @@ class DB_Sql_vb {
       return $this->show_keys_sql($m[1]);
     }
 
+    $sql = $this->rewrite_from_joins($sql);
     $sql = $this->rewrite_limit($sql);
     $sql = $this->rewrite_if($sql);
     $sql = $this->rewrite_isnull($sql);
@@ -316,11 +319,71 @@ class DB_Sql_vb {
     $sql = $this->rewrite_replace_into($sql);
     $sql = $this->rewrite_insert_nulls($sql);
     $sql = $this->rewrite_like($sql);
+    $sql = $this->rewrite_instr($sql);
     // Quoting goes last: the rewrites above parse table names with plain \w+
     // patterns, which double quotes would break.
     $sql = $this->quote_reserved($sql);
+    $sql = $this->rewrite_string_literals($sql);
 
     return $sql;
+  }
+
+  // MySQL escapes quotes inside literals with a backslash ('Who\'s Online'),
+  // PostgreSQL doubles them ('Who''s Online'). The board and its installer
+  // produce the MySQL form, so unescape those sequences and re-double the
+  // result. Runs with standard_conforming_strings=on, so the output is plain.
+  private function rewrite_string_literals($sql) {
+    $out = "";
+    $len = strlen($sql);
+    $i = 0;
+    while ($i < $len) {
+      $c = $sql[$i];
+      if ($c != "'") {
+        $out .= $c;
+        $i++;
+        continue;
+      }
+      // Collect one literal, honouring both '' and \' as escaped quotes.
+      $i++;
+      $content = "";
+      $closed = false;
+      while ($i < $len) {
+        $c = $sql[$i];
+        if ($c == '\\' && $i + 1 < $len) {
+          $n = $sql[$i + 1];
+          switch ($n) {
+            case 'n':  $content .= "\n"; break;
+            case 'r':  $content .= "\r"; break;
+            case 't':  $content .= "\t"; break;
+            case '0':  $content .= '';   break; // PostgreSQL rejects NUL bytes
+            case '\\': $content .= "\\"; break;
+            case "'":  $content .= "'";  break;
+            case '"':  $content .= '"';  break;
+            default:   $content .= $n;   break; // \% \_ and friends: drop the slash
+          }
+          $i += 2;
+          continue;
+        }
+        if ($c == "'") {
+          if ($i + 1 < $len && $sql[$i + 1] == "'") {
+            $content .= "'";
+            $i += 2;
+            continue;
+          }
+          $closed = true;
+          $i++;
+          break;
+        }
+        $content .= $c;
+        $i++;
+      }
+      $out .= "'" . str_replace("'", "''", $content) . "'";
+      if (!$closed) {
+        // Unterminated literal: keep the rest verbatim instead of mangling it.
+        return $sql;
+      }
+    }
+    return $out;
   }
 
   // Bare occurrences of the reserved identifiers used by this schema get
@@ -347,6 +410,17 @@ class DB_Sql_vb {
   // PostgreSQL LIKE is case sensitive. ILIKE restores the old behaviour.
   private function rewrite_like($sql) {
     return $this->replace_outside_quotes($sql, '/\b(NOT\s+)?LIKE\b/i', array($this, 'like_to_ilike'));
+  }
+
+  // MySQL INSTR(haystack, needle) and PostgreSQL STRPOS(haystack, needle) are
+  // both 1-based and take the arguments in the same order -- only the name
+  // differs. Used across the board for permission-list matching.
+  private function rewrite_instr($sql) {
+    return $this->replace_outside_quotes($sql, '/\bINSTR\s*\(/i', array($this, 'instr_to_strpos'));
+  }
+
+  private function instr_to_strpos($m) {
+    return "STRPOS(";
   }
 
   private function like_to_ilike($m) {
@@ -434,28 +508,36 @@ class DB_Sql_vb {
       }
     }
 
-    $pk = isset($this->primary_keys[$table]) ? $this->primary_keys[$table] : array();
-    if ($pk) {
-      $conflict = " ON CONFLICT (" . implode(',', $pk) . ")";
-      $sets = array();
+    // MySQL's REPLACE is delete-by-key-then-insert, and only does that when the
+    // table has a unique key. searchindex in this schema has none, so REPLACE
+    // there is a plain INSERT -- adding ON CONFLICT would be a "no unique
+    // constraint" error in PostgreSQL.
+    $pk = $this->conflict_target($table);
+    if (!$pk) {
+      return "INSERT INTO " . $table . ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " " . $rest;
+    }
+
+    $conflict = " ON CONFLICT (" . implode(',', $pk) . ")";
+    $sets = array();
+    if ($cols) {
       foreach ($cols as $c) {
         if (in_array($c, $pk)) {
           continue;
         }
         $sets[] = $c . " = EXCLUDED." . $c;
       }
-      if ($sets) {
-        $conflict .= " DO UPDATE SET " . implode(', ', $sets);
-      } else {
-        $conflict .= " DO NOTHING";
-      }
     } else {
-      // No key known: at least keep the statement valid and idempotent.
-      $conflict = " ON CONFLICT DO NOTHING";
+      // REPLACE ... SELECT: no column list, use the table's own columns.
+      foreach ($this->column_names($table) as $c) {
+        if (in_array($c, $pk)) {
+          continue;
+        }
+        $sets[] = $c . " = EXCLUDED." . $c;
+      }
     }
+    $conflict .= $sets ? " DO UPDATE SET " . implode(', ', $sets) : " DO NOTHING";
 
-    $head = "INSERT INTO " . $table . ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " " . $rest;
-    return $head . $conflict;
+    return "INSERT INTO " . $table . ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " " . $rest . $conflict;
   }
 
   // "INSERT INTO t VALUES (NULL, ...)" -- MySQL reads a NULL in an
@@ -508,6 +590,124 @@ class DB_Sql_vb {
       $pos = $close + 1;
     }
     return "INSERT INTO " . $table . ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " VALUES " . $out;
+  }
+
+  // ------------------------------------------------------------- FROM-clause
+
+  // MySQL accepts "FROM a,b,c LEFT JOIN d ON (...a.col...)". PostgreSQL parses
+  // that as "a, b, (c LEFT JOIN d ON ...)" and refuses to let the ON clause see
+  // the comma-joined tables ("invalid reference to FROM-clause entry"). Rewrite
+  // the comma list into explicit CROSS JOINs, which PostgreSQL scopes correctly.
+  private function rewrite_from_joins($sql) {
+    $offset = 0;
+    $guard = 0;
+    while ($guard++ < 100) {
+      $pos = $this->find_keyword($sql, 'FROM', $offset);
+      if ($pos === false) {
+        break;
+      }
+      $start = $pos + 4;
+      $end = $this->find_from_end($sql, $start);
+      if ($end === false) {
+        break;
+      }
+      $seg = substr($sql, $start, $end - $start);
+      $items = $this->split_top_level($seg);
+      if (count($items) > 1) {
+        // Keep the whitespace on both sides: "FROM a,b WHERE" -> "FROM a CROSS JOIN b WHERE"
+        $lead = substr($seg, 0, strlen($seg) - strlen(ltrim($seg)));
+        if ($lead === '') {
+          $lead = ' ';
+        }
+        $trail = substr($seg, strlen(rtrim($seg)));
+        $joined = $lead . implode(' CROSS JOIN ', array_map('trim', $items)) . $trail;
+        $sql = substr($sql, 0, $start) . $joined . substr($sql, $end);
+        $offset = $start + strlen($joined);
+      } else {
+        $offset = $end;
+      }
+    }
+    return $sql;
+  }
+
+  // Position of the first top-level JOIN/WHERE/... after a FROM list, or false.
+  private function find_from_end($sql, $start) {
+    $len = strlen($sql);
+    $depth = 0;
+    $quote = null;
+    $roots = array('JOIN', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'FOR', 'RETURNING');
+    for ($i = $start; $i < $len; $i++) {
+      $c = $sql[$i];
+      if ($quote !== null) {
+        if ($c == '\\') {
+          $i++;
+        } elseif ($c == $quote) {
+          $quote = null;
+        }
+        continue;
+      }
+      if ($c == "'" || $c == '"') {
+        $quote = $c;
+        continue;
+      }
+      if ($c == '(') {
+        $depth++;
+        continue;
+      }
+      if ($c == ')') {
+        $depth--;
+        if ($depth < 0) {
+          return false;
+        }
+        continue;
+      }
+      if ($depth == 0 && ($c == 'J' || $c == 'j') && $this->word_at($sql, $i, 'JOIN')) {
+        return $i;
+      }
+      if ($depth == 0) {
+        foreach ($roots as $kw) {
+          if (($c == $kw[0] || strtoupper($c) == $kw[0]) && $this->word_at($sql, $i, $kw)) {
+            return $i;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // Case-insensitive whole-word match starting at $pos, not inside an identifier.
+  private function word_at($sql, $pos, $word) {
+    $len = strlen($word);
+    if (strcasecmp(substr($sql, $pos, $len), $word) != 0) {
+      return false;
+    }
+    $before = ($pos > 0) ? $sql[$pos - 1] : ' ';
+    $after = isset($sql[$pos + $len]) ? $sql[$pos + $len] : ' ';
+    return !preg_match('/[\w$]/', $before) && !preg_match('/[\w$]/', $after);
+  }
+
+  private function find_keyword($sql, $word, $offset) {
+    $len = strlen($sql);
+    $quote = null;
+    for ($i = $offset; $i < $len; $i++) {
+      $c = $sql[$i];
+      if ($quote !== null) {
+        if ($c == '\\') {
+          $i++;
+        } elseif ($c == $quote) {
+          $quote = null;
+        }
+        continue;
+      }
+      if ($c == "'" || $c == '"') {
+        $quote = $c;
+        continue;
+      }
+      if ($this->word_at($sql, $i, $word)) {
+        return $i;
+      }
+    }
+    return false;
   }
 
   // --------------------------------------------------- catalog-backed SHOW shims
@@ -569,9 +769,14 @@ class DB_Sql_vb {
         $columns[] = "PRIMARY KEY (" . $this->ident_list($pk[1]) . ")";
         continue;
       }
-      if (preg_match('/^(UNIQUE\s+)?(KEY|INDEX)\s+([A-Za-z_][\w$]*)?\s*\((.+)\)$/is', $def, $idx)) {
+      if (preg_match('/^(UNIQUE\s+)?(KEY|INDEX)\s*([A-Za-z_][\w$]*)?\s*\((.+)\)$/is', $def, $idx)) {
         $unique = ($idx[1] != "") ? "UNIQUE " : "";
-        $name = ($idx[3] != "") ? $idx[3] : $table . "_idx" . (count($indexes) + 1);
+        $suffix = ($idx[3] != "") ? $idx[3] : "idx" . (count($indexes) + 1);
+        // MySQL index names are unique per table; PostgreSQL index names live
+        // in one namespace per schema ("CREATE INDEX userid ON post (...)"
+        // followed by "CREATE INDEX userid ON thread (...)" is a duplicate
+        // object error). Prefix with the table name.
+        $name = $this->quote_ident($table . "_" . $suffix);
         $indexes[] = "CREATE " . $unique . "INDEX " . $name . " ON " . $table_sql . " (" . $this->ident_list($idx[4]) . ")";
         continue;
       }
@@ -665,7 +870,12 @@ class DB_Sql_vb {
         break;
       case 'datetime':
       case 'timestamp':
-        $pgtype = 'timestamp';
+      case 'date':
+        // vBulletin 2 keeps dates as strings end to end: it stores '' for "unset",
+        // writes '0000-00-00', and matches birthdays with LIKE '%-11-05'. MySQL
+        // tolerated all of that on a date column; PostgreSQL does not, so keep
+        // the values textual and let string comparison do the work.
+        $pgtype = 'varchar(19)';
         break;
       default:
         $pgtype = $type . ($size != "" ? "(" . $size . ")" : "");
@@ -684,9 +894,25 @@ class DB_Sql_vb {
         $tail = str_replace($d[0], "DEFAULT " . $d[1], $tail);
       }
     }
-    // MySQL zero dates are legal, PostgreSQL rejects them; the board stores
-    // dates as integers anyway, so NULL is the safe equivalent.
-    $tail = preg_replace("/\bDEFAULT\s+'0000-00-00( 00:00:00)?'/i", "DEFAULT NULL", $tail);
+    // MySQL zero dates are legal, PostgreSQL rejects them on real date columns;
+    // with the varchar mapping above they stay as ordinary strings, so only a
+    // genuine date/timestamp column needs the nullable fallback.
+    if ($pgtype == 'date' || $pgtype == 'timestamp') {
+      $tail = preg_replace("/\bDEFAULT\s+'0000-00-00( 00:00:00)?'/i", "DEFAULT NULL", $tail);
+      $tail = preg_replace('/\bNOT\s+NULL\b/i', '', $tail);
+    }
+
+    // MySQL historically ran in non-strict mode and filled NOT NULL columns
+    // that an INSERT omitted with '' / 0; PostgreSQL rejects the missing value
+    // outright. Give those columns the same implicit default so existing
+    // INSERT statements keep working.
+    if (!$serial && preg_match('/\bNOT\s+NULL\b/i', $tail) && !preg_match('/\bDEFAULT\b/i', $tail)) {
+      if (in_array($pgtype, array('integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real'))) {
+        $tail .= " DEFAULT 0";
+      } elseif ($pgtype != 'bytea') {
+        $tail .= " DEFAULT ''";
+      }
+    }
 
     $tail = preg_replace('/\s+/', ' ', trim($tail));
     return $name . " " . $pgtype . ($tail != "" ? " " . $tail : "");
@@ -699,12 +925,15 @@ class DB_Sql_vb {
     if (!$info) {
       return array();
     }
-    ksort($info);
-    $names = array();
+    // Order by ordinal_position, not by name: INSERT ... VALUES without a
+    // column list binds values positionally, so the order has to be the table's
+    // own order or the serial column lands on the wrong value.
+    $bypos = array();
     foreach ($info as $col) {
-      $names[] = $col['name'];
+      $bypos[$col['pos']] = $col['name'];
     }
-    return $names;
+    ksort($bypos);
+    return array_values($bypos);
   }
 
   private function is_serial_column($table, $column) {
@@ -713,6 +942,50 @@ class DB_Sql_vb {
       return false;
     }
     return $info[$column]['serial'];
+  }
+
+  // Columns of the table's PRIMARY KEY, or of its first UNIQUE constraint, or
+  // an empty array when the table has no unique key at all.
+  private function conflict_target($table) {
+    if (isset($this->key_cache[$table])) {
+      return $this->key_cache[$table];
+    }
+    $this->key_cache[$table] = array();
+    if (!($this->is_linked())) {
+      return array();
+    }
+    $sql = "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name " .
+           "FROM information_schema.table_constraints tc " .
+           "JOIN information_schema.key_column_usage kcu " .
+           "  ON kcu.constraint_name = tc.constraint_name " .
+           " AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name " .
+           "WHERE tc.table_schema = " . $this->quote_literal($this->schema) .
+           " AND tc.table_name = " . $this->quote_literal($table) .
+           " AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE') " .
+           "ORDER BY kcu.ordinal_position";
+    $res = @pg_query($this->link_id, $sql);
+    if (!$this->is_result($res)) {
+      return array();
+    }
+    $groups = array();
+    while ($row = pg_fetch_row($res)) {
+      $groups[$row[0]]['type'] = $row[1];
+      $groups[$row[0]]['cols'][] = $row[2];
+    }
+    pg_free_result($res);
+
+    $chosen = array();
+    foreach ($groups as $g) {
+      if ($g['type'] == 'PRIMARY KEY') {
+        $chosen = $g['cols'];
+        break;
+      }
+      if (!$chosen) {
+        $chosen = $g['cols'];
+      }
+    }
+    $this->key_cache[$table] = $chosen;
+    return $chosen;
   }
 
   // position => array(name, serial), cached per request.
@@ -734,7 +1007,7 @@ class DB_Sql_vb {
     $info = array();
     while ($row = pg_fetch_row($res)) {
       $serial = (strpos((string) $row[1], 'nextval(') === 0);
-      $info[$row[0]] = array('name' => $row[0], 'serial' => $serial);
+      $info[$row[0]] = array('name' => $row[0], 'serial' => $serial, 'pos' => (int) $row[2]);
     }
     pg_free_result($res);
     $this->column_cache[$table] = $info;

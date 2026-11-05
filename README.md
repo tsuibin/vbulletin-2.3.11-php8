@@ -520,44 +520,79 @@ free_result / query_first / data_seek / num_rows / num_fields / insert_id / clos
 | `LIMIT offset,count` | 会员列表、搜索、帖子列表等 | `LIMIT count OFFSET offset` |
 | `IF(cond,a,b)` | 14 | `(CASE WHEN cond THEN a ELSE b END)`，支持嵌套 |
 | `ISNULL(x)` | 2 | `(x IS NULL)` |
+| `INSTR(s,sub)` | 45（后台用户/主题管理、`member.php`、`search.php` 等） | `STRPOS(s,sub)`，同参数、同 1 起始下标 |
 | `UNIX_TIMESTAMP([date])` | 43 | `EXTRACT(EPOCH FROM ...)::bigint`，无参用 `now()` |
 | `FROM_UNIXTIME(ts[,fmt])` | 20 | `to_timestamp(ts)`，带格式则走 `to_char` + 格式码映射 |
-| `REPLACE INTO` | 3 | `INSERT ... ON CONFLICT (主键) DO UPDATE`，主键表在 `$primary_keys` 里声明 |
+| `REPLACE INTO` | 3 | `INSERT ... ON CONFLICT (...) DO UPDATE`，冲突列**运行时**查 `information_schema`（见下） |
 | `INSERT ... VALUES (NULL, ...)` | 安装器 + 建表后插入 | 自增列的 `NULL` 改成 `DEFAULT`（PG 不接受显式 NULL） |
 | `LIKE` | 模板/搜索 | `ILIKE`（MySQL 那套 ci 排序规则是大小写不敏感的） |
+| `FROM a,b,c LEFT JOIN d ON (…a.列…)` | `functions.php:2544` 订阅通知等 | 逗号列表改写成 `CROSS JOIN`（见下） |
+| 字符串里的 `\'` / `\\` | 安装器、`addslashes` 产物 | 反转义后按 PG 规则双写单引号（`'Who\'s'` → `'Who''s'`） |
 | `SHOW TABLES` / `SHOW FIELDS` / `SHOW KEYS` | 安装器、`admin/backup.php` | 查 `pg_tables` / `information_schema`，列名按 MySQL 的名字起别名 |
 | 表名 `user` | 全站 | `"user"`（`USER` 在 PG 里是保留字，且裸写会被当成 `current_user`） |
 
-前四项之外还有一处必须注意：**`admin/functions.php:2544` 的
-`LEFT JOIN style ON (IF(user.styleid=0, 1, user.styleid)=style.styleid)`**，就是最初那个
-`Unknown column 'user.styleid' in 'ON'` 的现场，在 PG 下同样走 `IF→CASE` 改写。
+两处改写的来由值得单独记一笔，它们都是**真机跑出来的**，不是预想的：
 
-**建表（DDL）转换**：安装器的 schema 是 94 条 MySQL `CREATE TABLE` 字符串，PG 跑不了。
+- **逗号 FROM + JOIN**：`SELECT … FROM subscribethread,user,usergroup LEFT JOIN style ON
+  (IF(user.styleid=0,1,user.styleid)=style.styleid)`。MySQL 允许 `ON` 里引用逗号列表中的表，
+  PG 把 `c LEFT JOIN d` 解析成 FROM 列表的第三项，于是 `ON` 看不见 `user`，报
+  `invalid reference to FROM-clause entry`。`rewrite_from_joins()` 把 FROM 段的顶层逗号
+  改成 `CROSS JOIN` 后语义与 MySQL 一致（两者本来也不构成外连接条件）。
+- **`REPLACE INTO` 的冲突列**：原来写死一张 `$primary_keys` 表，`searchindex` 在 MySQL 里
+  **根本没有主键**（只有三列 `DEFAULT '0' NOT NULL`），MySQL 的 REPLACE 于是退化成普通
+  INSERT；写死主键会让 `ON CONFLICT` 报 `there is no unique or exclusion constraint`。
+  现在 `conflict_target()` 查 `information_schema.table_constraints`，取 PRIMARY KEY，
+  没有就取第一个 UNIQUE，都没有就退化成纯 `INSERT`。
+
+**建表（DDL）转换**：安装器的 schema 是 MySQL `CREATE TABLE` 字符串，PG 跑不了。
 `db_pgsql.php` 提供 `convert_ddl()`，安装器的 `doqueries()` 检测到该方法后按「一条 MySQL 语句 →
 若干条 PG 语句」执行：
 
 - `int(10) unsigned` → `bigint`（MySQL unsigned int 上限 4294967295，超出 PG `integer`）；
   `smallint/tinyint` → `smallint`，unsigned 的 `smallint` → `integer`
 - `text/mediumtext/longtext` → `text`，`blob` 系列 → `bytea`，`enum(...)` → `varchar(64)`
+- **`date` / `datetime` → `varchar(19)`**：vB2 全程把日期当字符串用（生日存空串、写
+  `'0000-00-00'`、用 `LIKE '%-11-05'` 匹配），MySQL 的 date 列容忍这些，PG 不容忍
+  （`operator does not exist: date ~~* unknown`）。全库只有 `user.birthday` 与
+  `calendar_events.eventdate` 两列，保留字面值比改业务代码划算，ISO 字符串的大小比较
+  也与日期比较同序。
 - `auto_increment` → `serial` / `bigserial`，`NOT NULL` 去掉（serial 隐含非空）
-- 数值列的 `DEFAULT '0'` 去掉引号；`DEFAULT '0000-00-00'` → `DEFAULT NULL`
-- `KEY name (cols)` / `UNIQUE KEY` 拆成独立的 `CREATE INDEX`（一条表可能变成多条语句）
-- 索引里的前缀长度 `col(10)` 去掉（PG 不支持）
+- 数值列的 `DEFAULT '0'` 去掉引号；真 date/timestamp 列的 `DEFAULT '0000-00-00'` → 可空
+- **`NOT NULL` 且无默认值的列补 `DEFAULT 0` / `DEFAULT ''`**：MySQL 历史非严格模式会替
+  省略的列补空值，PG 直接报 not-null 违规（`INSERT INTO bbcode VALUES ('…')` 就踩在这里）
+- `KEY name (cols)` / `UNIQUE KEY` / 无名字的 `INDEX (cols)` 拆成独立的 `CREATE INDEX`，
+  **索引名加表名前缀**（PG 的索引名是全 schema 唯一，`CREATE INDEX userid ON post` 与
+  `ON thread` 会撞名），前缀长度 `col(10)` 去掉（PG 不支持）
 
 安装器本身不用改流程：`$dbservertype` 由表单填写，填 `pgsql` 即走新驱动；数据库连不上时的
 「自动建库」分支保留 MySQL 的 `errno==1049` 判断，PG 侧请先手工 `createdb`。
 
-**明确未验证 / 已知缺口**（这一项与 4.9–4.16 不同，**没有在真实 PostgreSQL 上跑过**）：
+**真机验证**：PG 支持已在源码编译的 PostgreSQL **18.6** + PHP **8.5.0**（`pgsql`/`pdo_pgsql`/
+`mysqli`/`gd`）上跑通全流程，不是只在静态检查层面通过：
 
-1. 本仓库的验证环境只有 MariaDB，PG 侧代码仅通过静态检查（括号/引号配平、接口方法对齐、
-   `convert_ddl` 规则逐条过），**未连接过任何 PG 实例**。
+- 98 个 PHP 文件 `php -l` 全通过；安装器 `install4php5.php` 从 step 1 走到 step 10
+  「You have now completed the install」，建表 **40 张 / 64 条语句 / 0 失败**，
+  灌入模板 487、设置 171、设置组 31、替换集 43、样式 1，并建出管理员账号。
+- 前台 `index.php`、`forumdisplay.php`、`showthread.php`、`memberlist.php`、`calendar.php`、
+  `online.php`、`search.php`、`register.php`、`faq.php`、`misc.php?action=bbcode` 全部 200、
+  无 SQL 错误；侧栏「最新主题」、版块列表、帖子正文、在线列表均正常出数。
+- 19 项功能用例（自增 `NULL`、`insert_id`、`UNIX_TIMESTAMP`、`LIMIT 0,5`、`LIKE 'ALI%'`、
+  `REPLACE INTO` 两次 upsert、`REPLACE ... SELECT`、三种 `SHOW`、`query_first`、`data_seek`）
+  在空库上全绿。
+
+**仍然存在的缺口**：
+
+1. **本仓库的源码是裁剪过的**，没有 `login.php`，模板里也没有 `login` 模板，所以
+   *登录、发帖、回帖、后台管理* 这些需要身份的操作无法在本仓库上端到端验证；PG 驱动本身
+   没有挡住这些路径的 SQL，缺的是文件。
 2. **`GROUP BY` 严格模式**：PG 要求 SELECT 里所有非聚合列都出现在 `GROUP BY`，MySQL 不要求。
-   这类查询只能在跑到时暴露，没有逐条排查（论坛统计、日历、版块聚合是重点怀疑对象）。
-3. **整型列与空串比较**：`WHERE userid=''` 这类写法在 MySQL 里恒为假、在 PG 里直接报
-   `invalid input syntax for integer`。代码里主要走 PHP 判空，但无法断言全部干净。
-4. **`admin/backup.php` 的导出仍是 MySQL 方言**（`SHOW FIELDS` 靠上表里的 shim 勉强可用，
-   但生成的 `CREATE TABLE` 是 MySQL 语法），导出文件不能再导入 PG；`restore` 同理。
-5. 全文检索 / `searchindex` 的分词逻辑未按 PG 调整，`REPLACE INTO` 只处理了主键已知的三张表。
+   已跑过的页面没有触发，但论坛统计、日历、版块聚合这类查询没有逐条排查。
+3. **整型列与空串比较**：`WHERE userid=''` 在 MySQL 里恒为假、在 PG 里报
+   `invalid input syntax for integer`。代码里主要走 PHP 判空，未系统性排查。
+4. **`admin/backup.php` 的导出仍是 MySQL 方言**（`SHOW FIELDS/KEYS` 已由 shim 覆盖，
+   `SHOW TABLES` 实测返回 40 行），但生成的 `CREATE TABLE` 不能导回 PG；`restore` 同理。
+5. 全文检索 / `searchindex` 的分词逻辑未按 PG 调整（`REPLACE INTO` 在该表上按无主键处理，
+   退化成了普通 INSERT，与 MySQL 行为一致）。
 6. 排序与大小写：`ORDER BY` 在 MySQL 默认 ci、PG 按字节序，中文/英文混排顺序会不一致。
 
 ## 5. 运行要求
@@ -565,7 +600,7 @@ free_result / query_first / data_seek / num_rows / num_fields / insert_id / clos
 | 组件 | 要求 |
 |---|---|
 | PHP | 8.x（实测 **8.5.12**）；需启用 `mysqli`，`gd` 可选（验证码/头像） |
-| 数据库 | MySQL / MariaDB（实测 **MariaDB 13.0.1**）；也可选 PostgreSQL（`$dbservertype='pgsql'`，见 4.17，**尚未实测**） |
+| 数据库 | MySQL / MariaDB（实测 **MariaDB 13.0.1**）；也可选 PostgreSQL（`$dbservertype='pgsql'`，见 4.17，**已在 PostgreSQL 18.6 上跑通安装器与前台页面**） |
 | 不再需要 | `register_globals`、`register_long_arrays`、magic quotes、`short_open_tag`、ext/mysql |
 | 字符集 | **UTF-8 / `utf8mb4`**：表、连接、HTTP 头、HTML meta 四者需一致。新建库请用 `CREATE DATABASE ... CHARACTER SET utf8mb4`；存量库需 `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4`（见 4.9） |
 | Web 服务 | 任意能执行 PHP 的服务器；`admin/` 下 21 个 `upgrade*.php`、安装脚本与 `tools/` 目录**必须禁止 Web 访问** |
