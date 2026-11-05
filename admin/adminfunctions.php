@@ -41,6 +41,7 @@ echo '<div align="center" style="font:10px Verdana,Arial,sans-serif;color:#888;p
 <?php
 
 	if ($gzipoutput and !headers_sent() and function_exists("ob_start") and function_exists("crc32") and function_exists("gzcompress") and !$nozip) {
+    $encoding = '';
     if (strpos(" ".$HTTP_ACCEPT_ENCODING,"x-gzip")) {
       $encoding = "x-gzip";
     }

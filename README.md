@@ -353,7 +353,9 @@ vBulletin 2.3 没有语言层：界面文字散落在 488 个数据库模板和 
 - en 语言返回空映射，渲染路径与原来完全一致。
 - 只新增 4 个文件 + 3 处钩子（`functions.php` 加载、`gettemplate()` 翻译、`global.php` 切换）。
 
-**覆盖率**：模板侧抽取的 **897 条已全部翻译**（导航、版块/主题、发帖表单、分页、时区/日期、账号、搜索、日历、FAQ、常见错误与跳转提示）；只有 11 条字体名/代码示例/空白保留原样。后台 CP 仍为英文。语言包共 966 条（含 `Never`、`Today`、`Yesterday`、月份缩写等 PHP 侧词条）。新增文案只需重跑 `tools/extract_lang.php` 并在 `lang_zh.php` 补一行。
+**覆盖率**：模板侧抽取的 **897 条已全部翻译**（导航、版块/主题、发帖表单、分页、时区/日期、账号、搜索、日历、FAQ、常见错误与跳转提示）；只有 11 条字体名/代码示例/空白保留原样。语言包共 1000+ 条，另含后台 CP 的导航、登录与常用按钮（见下）。新增文案只需重跑 `tools/extract_lang.php` 并在 `lang_zh.php` 补一行。
+
+**后台 CP**：`admin/global.php` 同样处理 `?lang=`（保留 `s=` 等参数），导航栏底部和登录页都有「中文 | English」切换。CP 页面是纯 PHP 输出、不走 `gettemplate()`，因此非英文时用 `ob_start()` + `register_shutdown_function` 对整页做一次文本节点替换，`action=nav` / `action=home` 这类不调用 `cpfooter()` 的 frame 也能翻译。**英文模式不启用缓冲，行为与原版完全一致。** 目前 CP 词表覆盖导航、登录、常用按钮/表头，各页面的长描述仍为英文，可继续在 `lang_zh.php` 补条目。
 
 验证：`?lang=zh` 切换后 cookie 生效、页面出现中文；切回 `?lang=en` 完全恢复英文；
 12 个页面 × 2 种语言均 0 PHP 警告；`php -l` 全树 0 失败；英文页面的中文仅来自用户数据与切换条。
@@ -455,6 +457,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | 回复 / 搜索 / 私信 | 真实 HTTP 回复成功、无 `Unknown column`；6 条改写 SQL 解析通过；多种搜索词无报错 |
 | BBCode / 实体解码 | `[url]`/`[list]`/`[code]`/`[php]`/`[b]`/`[email]` 与 `&#20013;` 均正确；发帖转跳页 0 警告 |
 | 中英切换 | cookie 生效，12 页面 × 2 语言 0 警告；897 条模板文案全量翻译；en 渲染与原文一致，用户内容不被翻译 |
+| 后台 CP 切换 | `/admin/?s=x&lang=zh` 302 保留参数并写 cookie；nav/home/forum/user 均出现中文，en 模式不变 |
 | 加载计时 | 前台 11 页面 × 中英、后台 CP 均输出页面/模板耗时；模板耗时 < 页面耗时 |
 | 附件二进制 | `filedata`/`avatardata` 改为 BLOB；上传→入库→下载 md5 与源文件一致 |
 | 图片内联 | `viewattachedimages=1` + `forum.allowimages=1`；帖子渲染为 `<img src="attachment.php…">`，不再需点击 |

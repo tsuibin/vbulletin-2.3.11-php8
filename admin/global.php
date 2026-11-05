@@ -1,5 +1,21 @@
 <?php
 require_once __DIR__ . '/php8compat.php';
+require_once __DIR__ . '/lang.php';
+vb_lang_switch();
+
+// CP pages are plain PHP echoes (no templates). For non-English languages,
+// buffer the whole response and translate it on shutdown, so every admin page
+// follows the bblanguage cookie without touching individual files.
+if (vb_lang_current() !== 'en' && !headers_sent() && function_exists('ob_start')) {
+    ob_start();
+    register_shutdown_function(function () {
+        if (ob_get_level() > 0) {
+            $html = ob_get_contents();
+            ob_end_clean();
+            echo vblang_template($html);
+        }
+    });
+}
 error_reporting(7);
 if (isset($_GET['explain']) OR isset($_POST['explain'])) {
 	
@@ -240,6 +256,7 @@ echo htmlspecialchars(str_replace('javascript', 'java script', $url));
 </form>
 </td></tr></table>
 </td></tr></table>
+<p align="center"><font size="1"><a href="<?php echo htmlspecialchars(vb_lang_url('zh')); ?>">中文</a> | <a href="<?php echo htmlspecialchars(vb_lang_url('en')); ?>">English</a></font></p>
 <p align="center"><font size="1">vBulletin v<?php echo $templateversion ?> Administrator Control Panel</font></p>
 <?php
   cpfooter();

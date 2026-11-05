@@ -375,6 +375,11 @@ makenavselect("Templates","<hr>");
 // *************************************************
 ?>
 </table>
+<hr>
+<center><font size="1">
+<a href="index.php?s=<?php echo $session['sessionhash']; ?>&amp;lang=zh" target="_top">中文</a> |
+<a href="index.php?s=<?php echo $session['sessionhash']; ?>&amp;lang=en" target="_top">English</a>
+</font></center>
 </form></BODY></HTML>
 <?php
 }
