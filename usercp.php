@@ -99,7 +99,7 @@ $messagedone=0;
 $privmsgsbit = '';
 $privatemessages = '';
 //different retrival methods based on which table
-$messages = $DB_site->query("SELECT privatemessage.*,touser.username AS tousername,fromuser.username AS fromusername,icon.title AS icontitle,icon.iconpath FROM privatemessage,user AS touser,user AS fromuser LEFT JOIN icon ON icon.iconid=privatemessage.iconid WHERE privatemessage.userid='$bbuserinfo[userid]' AND folderid=0 AND touser.userid=privatemessage.touserid AND fromuser.userid=privatemessage.fromuserid AND messageread=0 $ignoreusers ORDER BY dateline DESC");
+$messages = $DB_site->query("SELECT privatemessage.*,touser.username AS tousername,fromuser.username AS fromusername,icon.title AS icontitle,icon.iconpath FROM privatemessage JOIN user AS touser ON touser.userid=privatemessage.touserid JOIN user AS fromuser ON fromuser.userid=privatemessage.fromuserid LEFT JOIN icon ON icon.iconid=privatemessage.iconid WHERE privatemessage.userid='$bbuserinfo[userid]' AND folderid=0 AND messageread=0 $ignoreusers ORDER BY dateline DESC");
 while ($privatemessage=$DB_site->fetch_array($messages)) {
 
   // get the more useful of the to/from field

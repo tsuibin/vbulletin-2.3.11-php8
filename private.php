@@ -368,10 +368,11 @@ if ($action=="show") {
 
     $post=$DB_site->query_first("SELECT
                                  user.*,userfield.*".iif($avatarenabled,",avatar.avatarpath,customavatar.dateline AS avatardateline,NOT ISNULL(customavatar.avatardata) AS hascustomavatar ","")."
-                                 FROM user,userfield
+                                 FROM user
+                                 JOIN userfield ON userfield.userid=user.userid
                                  ".iif ($avatarenabled,"LEFT JOIN avatar ON avatar.avatarid=user.avatarid
                                                         LEFT JOIN customavatar ON customavatar.userid=user.userid ","")."
-                                 WHERE userfield.userid=user.userid AND user.userid=$message[fromuserid]");
+                                 WHERE user.userid=$message[fromuserid]");
     $userinfo=$post;
 
 	unset($onlinestatus);

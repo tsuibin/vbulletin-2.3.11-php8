@@ -240,10 +240,10 @@ if ($action=="updatethread") {
   $threads=$DB_site->query("SELECT MIN(post.postid) AS minpost, MAX(post.postid) AS maxpost, thread.threadid, MAX(post.dateline) AS dateline,
  							(COUNT(*)-1) AS posts,
  							  SUM(attachment.visible) AS attachsum
-							FROM post,thread
+							FROM post
+							JOIN thread ON thread.threadid=post.threadid
 							LEFT JOIN attachment ON attachment.attachmentid=post.attachmentid
-							WHERE thread.threadid=post.threadid
-							 AND thread.threadid>=$startat
+							WHERE thread.threadid>=$startat
 							 AND thread.threadid<$finishat
 							GROUP BY thread.threadid
 							ORDER BY threadid DESC");

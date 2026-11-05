@@ -62,6 +62,7 @@ admin/php8compat.php 【新增】PHP 8 兼容层
 | C | 登录态下的 TypeError | 规范化 `timezoneoffset`；`floor(phpversion())` 系列加显式数值转换 |
 | D | 中文 / UTF-8 支持 | 全站显式 `UTF-8` 声明（HTTP 头 + meta）；连接固定 `utf8mb4`；表转 `utf8mb4` |
 | E | 中文发帖乱码（发布链路） | `censortext()` 两处按字节 `chr(173)`/`chr(160)` 替换改为匹配完整 UTF-8 序列 |
+| F | MySQL 8 JOIN 优先级 | 6 处 `FROM a,b LEFT JOIN c ON (...a.col...)` 改为显式 `JOIN ... ON` |
 | — | 验证 | PHP 8.5.12 + MariaDB 13.0.1 真库端到端回归 |
 
 以下按文件逐项说明。
@@ -248,6 +249,53 @@ $text = str_replace("\xC2\xA0", '_', $text);   // U+00A0
 > 注：早期验证曾用 SQL `CONCAT` 直接追加字符，绕过了 `censortext()` 等 PHP 处理链，
 > 因此没暴露这个问题。以真实表单 POST 为准。
 
+### 4.11 MySQL 8 的 JOIN 优先级：`Unknown column ... in 'ON'`
+
+vB 2.3.11 大量使用「逗号隐式连接 + `LEFT JOIN`」混写，例如 `sendnotification()`：
+
+```sql
+SELECT user.*, style.templatesetid
+FROM subscribethread,user,usergroup
+LEFT JOIN style ON (IF(user.styleid=0, 1, user.styleid)=style.styleid)
+WHERE ...
+```
+
+旧 MySQL（3.x/4.x）把整串逗号表当作 `LEFT JOIN` 的左表；**MySQL 5.0+ / 8 / MariaDB
+按 SQL 标准让 `JOIN` 的优先级高于逗号运算符**，上式被解析为
+`subscribethread, user, (usergroup LEFT JOIN style ON ...)`，于是 `ON` 里的
+`user.styleid` 属于尚未参与该 JOIN 的表 → `ERROR 1054 (42S22): Unknown column
+'user.styleid' in 'ON'`。该查询由 `newreply.php` 回复时的 `sendnotification()` 调用，
+所以一回复就报错。
+
+修复：全部改为**显式 JOIN**，并把 `WHERE` 里的表间连接条件移到 `ON`：
+
+```sql
+FROM subscribethread
+JOIN user ON subscribethread.userid = user.userid
+JOIN usergroup ON usergroup.usergroupid = user.usergroupid
+LEFT JOIN style ON (IF(user.styleid=0, 1, user.styleid)=style.styleid)
+WHERE ...
+```
+
+共修 6 处：
+
+| 文件 | 触发路径 |
+|---|---|
+| `admin/functions.php` `sendnotification()` | 回复 / 版主操作后的订阅邮件通知（用户报告的报错） |
+| `usercp.php` | 用户 CP 私信列表（实测报 `privatemessage.iconid`） |
+| `private.php` | 查看私信（开启头像时） |
+| `admin/misc.php` | 后台重建帖数 / 附件计数 |
+| `search.php`（2 处） | 搜索结果按主题 / 按帖子显示 |
+
+`search.php` 里可能出现的 `,searchindex` 相应改为 `CROSS JOIN searchindex`，
+保证仍在 JOIN 链内、后续 `LEFT JOIN` 的 `ON` 能引用前面的表。
+`admin/thread.php` 两处 `FROM post,thread LEFT JOIN forum USING (forumid)` 因
+`USING` 不写表前缀、不会触发「未知列」，保持原样（结果集语义等价）。
+
+验证：6 条改写后的 SQL 全部在 MariaDB 13 上解析执行成功；真实 HTTP 回复发帖成功
+（无 `Unknown column` / `mysql error`，中文正文完整）；`usercp.php` 不再报错；
+多种搜索词、3 种登录态 × 15 页面回归 0 错误。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
@@ -297,6 +345,7 @@ PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t site router.php
 | SQL 转义行为 | 输出与改动前逐字节一致（`vb_escape` 与 `addslashes` 在本字符集下等价），注入载荷被正确中和 |
 | UTF-8 中文 | 连接 `utf8mb4`；emoji + 中文写入/读出字节一致，无新增 `U+FFFD`；页面带 HTTP 头与 meta 双声明 |
 | 中文发帖（真实 POST） | `中文发帖测试_😀_中` 标题/正文完整入库，无 `U+FFFD`、无 `?`；预览路径同样正常 |
+| 回复 / 搜索 / 私信 | 真实 HTTP 回复成功、无 `Unknown column`；6 条改写 SQL 解析通过；多种搜索词无报错 |
 | 回归 | 3 种登录态 × 15 页面 0 错误；两树 `php -l` 全通过 |
 
 ## 8. 已知遗留问题（重要，勿用于生产）

@@ -789,12 +789,13 @@ if ($action=="showresults") {
       user.userid AS postuserid,
       threadicon.iconpath AS threadiconpath,threadicon.title AS threadicontitle
     FROM
-      thread,forum".iif(strpos($search['query'],"searchindex")>0,",searchindex","")."
+      thread
+      JOIN forum ON thread.forumid=forum.forumid".iif(strpos($search['query'],"searchindex")>0," CROSS JOIN searchindex","")."
     LEFT JOIN user ON user.username=thread.postusername
     LEFT JOIN icon AS threadicon ON thread.iconid=threadicon.iconid
     $dotjoin
     WHERE
-      thread.forumid=forum.forumid AND $threadids
+      $threadids
     ORDER BY
       $orderbysql";
 
@@ -878,13 +879,14 @@ if ($action=="showresults") {
       posticon.iconpath AS posticonpath,posticon.title AS posticontitle,
       threadicon.iconpath AS threadiconpath,threadicon.title AS threadicontitle
     FROM
-      post".iif(strpos($search['query'],"searchindex")>0,",searchindex","").",thread
+      post".iif(strpos($search['query'],"searchindex")>0," CROSS JOIN searchindex","")."
+      JOIN thread ON thread.threadid=post.threadid
     LEFT JOIN forum ON forum.forumid=thread.forumid
     LEFT JOIN user ON user.userid=post.userid
     LEFT JOIN icon AS threadicon ON thread.iconid=threadicon.iconid
     LEFT JOIN icon AS posticon ON post.iconid=posticon.iconid
     WHERE
-      $postids AND thread.threadid=post.threadid
+      $postids
     ORDER BY
       $orderbysql";
 

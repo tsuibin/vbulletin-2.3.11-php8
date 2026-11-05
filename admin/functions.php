@@ -2462,12 +2462,15 @@ function sendnotification ($threadid, $userid, $postid) {
                                          LIMIT 1");
   }
 
+  // MySQL 8 / MariaDB: JOIN binds tighter than the comma operator, so
+  // "FROM a,b,c LEFT JOIN d ON (...a.col...)" is parsed as "a,b,(c LEFT JOIN d)"
+  // and a.col is unknown in ON. Use explicit JOINs instead.
   $useremails=$DB_site->query("SELECT user.*, style.templatesetid
-                               FROM subscribethread,user,usergroup
+                               FROM subscribethread
+                               JOIN user ON subscribethread.userid=user.userid
+                               JOIN usergroup ON usergroup.usergroupid=user.usergroupid
                                LEFT JOIN style ON (IF(user.styleid=0, 1, user.styleid)=style.styleid)
                                WHERE subscribethread.threadid='$threadid'
-                                 AND subscribethread.userid=user.userid
-                                 AND usergroup.usergroupid=user.usergroupid
                                  AND user.userid<>'$userid'
                                  AND user.usergroupid<>'3'
                                  AND usergroup.canview = 1
