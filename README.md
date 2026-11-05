@@ -520,7 +520,7 @@ free_result / query_first / data_seek / num_rows / num_fields / insert_id / clos
 | `LIMIT offset,count` | 会员列表、搜索、帖子列表等 | `LIMIT count OFFSET offset` |
 | `IF(cond,a,b)` | 14 | `(CASE WHEN cond THEN a ELSE b END)`，支持嵌套 |
 | `ISNULL(x)` | 2 | `(x IS NULL)` |
-| `INSTR(s,sub)` | 45（后台用户/主题管理、`member.php`、`search.php` 等） | `STRPOS(s,sub)`，同参数、同 1 起始下标 |
+| `INSTR(s,sub)` | 51（后台用户/主题管理、`member.php`、`search.php` 等） | `STRPOS(s,sub)`，同参数、同 1 起始下标 |
 | `UNIX_TIMESTAMP([date])` | 43 | `EXTRACT(EPOCH FROM ...)::bigint`，无参用 `now()` |
 | `FROM_UNIXTIME(ts[,fmt])` | 20 | `to_timestamp(ts)`，带格式则走 `to_char` + 格式码映射 |
 | `REPLACE INTO` | 3 | `INSERT ... ON CONFLICT (...) DO UPDATE`，冲突列**运行时**查 `information_schema`（见下） |
