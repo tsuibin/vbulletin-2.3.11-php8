@@ -459,6 +459,31 @@ HTTP 请求就会连库并**覆盖写 `admin/lang_en.php`**。现在：
 - 统计/列表列头名词化：`Views` → `查看数`、`Replies` → `回复数`、`Threads:` → `主题数：`、
   `Posts:` → `帖子数：`。
 
+**设置项的标题与组名**
+上一轮只翻译了设置项的帮助文本（`setting.description`），列表里每个设置项的粗体标题、
+以及左侧的 31 个设置组名仍是英文，整页是中英混排。这些文案来自安装器而不是模板，
+`tools/extract_lang.php` 抽不到，所以单独放在 `admin/lang_zh_titles.php`：
+
+```php
+return array(
+    'setting' => array('bbactive' => '论坛是否开放', ...),  // key = setting.varname
+    'group'   => array('General Settings' => '常规设置', ...), // key = settinggroup.title
+);
+```
+
+由 `vbsetting_title()` / `vbsettinggroup_title()` 在 `admin/options.php`（分组目录、分组表头、
+设置行标题）与 `admin/setting.php`（设置管理列表）里取用。
+
+两项实现上的选择：
+
+- **按 `varname` 而不是按英文原文做键**。同一个英文标题会出现在不同设置上（例如头像和附件
+  都有 `Maximum File Size`），按原文做键只能给一个译文；
+- **不并入 `vb_lang_map()`**。一旦并进去，前台模板里任何恰好叫 `URL`、`Refresh` 的文本也会被
+  替换成后台语境下的译文（`URL` → `论坛 URL`），语义就跑偏了。
+
+覆盖情况：171 个设置项标题、31 个设置组名全部有译文（脚本按安装器的 `INSERT` 逐条断言，
+缺一条就报错退出）。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

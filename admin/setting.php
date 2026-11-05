@@ -206,6 +206,7 @@ if ($action=="modify") {
 
   while ($settinggroup=$DB_site->fetch_array($settinggroups)) {
 
+    $settinggroup['title'] = vbsettinggroup_title($settinggroup['title']);
     echo "<hr><li>$settinggroup[title] ".
 			makelinkcode("edit","setting.php?s=$session[sessionhash]&amp;action=editgroup&amp;settinggroupid=$settinggroup[settinggroupid]").
 			makelinkcode("remove","setting.php?s=$session[sessionhash]&amp;action=removegroup&amp;settinggroupid=$settinggroup[settinggroupid]").
@@ -215,7 +216,7 @@ if ($action=="modify") {
     $settings=$DB_site->query("SELECT settingid,title,varname FROM setting WHERE settinggroupid=$settinggroup[settinggroupid] ORDER BY displayorder");
     while ($setting=$DB_site->fetch_array($settings)) {
 
-      echo "<li>$setting[title] ($setting[varname]) ".
+      echo "<li>".vbsetting_title($setting['varname'], $setting['title'])." ($setting[varname]) ".
 				makelinkcode("edit","setting.php?s=$session[sessionhash]&amp;action=edit&amp;settingid=$setting[settingid]").
 				makelinkcode("remove","setting.php?s=$session[sessionhash]&amp;action=remove&amp;settingid=$setting[settingid]").
 				"</li>\n";

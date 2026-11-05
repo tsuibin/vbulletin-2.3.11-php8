@@ -1,6 +1,7 @@
 <?php
 // Chinese translations for setting help text, keyed by setting.varname.
-// Used by admin/options.php and admin/setting.php via vbsetting_desc().
+// Used by admin/options.php via vbsetting_desc(). admin/setting.php shows the
+// raw description on purpose: that page edits the stored value.
 return array(
     'WOLenable' => '选择「否」将对所有人关闭「在线用户」。',
     'WOLguests' => '在「在线用户」中显示访客活动？',

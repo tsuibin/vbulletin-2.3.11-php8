@@ -43,6 +43,7 @@ logip
   $numgroups = $DB_site->num_rows($settinggroups);
   $percolumn = ceil($numgroups/2);
   while ($settinggroup=$DB_site->fetch_array($settinggroups)) {
+  	$settinggroup['title'] = vbsettinggroup_title($settinggroup['title']);
   	if ($settingcounter++ == $percolumn) { echo "</ul></td><td><ul>"; }
 	echo makelinkcode($settinggroup['title'],"#settinggroup$settinggroup[settinggroupid]")."<br>\n";
   }
@@ -53,6 +54,7 @@ logip
 
   $DB_site->data_seek(0,$settinggroups);
   while ($settinggroup=$DB_site->fetch_array($settinggroups)) {
+    $settinggroup['title'] = vbsettinggroup_title($settinggroup['title']);
 
     echo "<table cellpadding='0' cellspacing='0' border='0' width='100%' class='tblborder'><tr><td>\n";
 	echo "<table cellpadding='4' cellspacing='1' border='0' width='100%'>\n";
@@ -62,6 +64,7 @@ logip
     while ($setting=$DB_site->fetch_array($settings)) {
 
       $setting['description'] = vbsetting_desc($setting['varname'], $setting['description']);
+      $setting['title'] = vbsetting_title($setting['varname'], $setting['title']);
       echo "<tr class='".getrowbg()."'>\n<td width=\"65%\"><p><b>$setting[title]</b><br><font size='1'>$setting[description]</font></p></td>\n<td width=\"35%\">";
 
       if ($setting['optioncode']=="") {

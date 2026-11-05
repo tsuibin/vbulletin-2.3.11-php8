@@ -229,6 +229,41 @@ if (!function_exists('vbphrase')) {
         return isset($map[$varname]) ? $map[$varname] : $description;
     }
 
+    /** Setting titles and group names, keyed by varname / group title.
+     *
+     * They live in the installer rather than in templates, so extract_lang.php
+     * never sees them. Keeping them in their own map also means the generic
+     * template translator cannot rewrite a front-end string that happens to
+     * read the same as a setting label.
+     */
+    function vbsetting_label($kind, $key, $fallback)
+    {
+        static $data = null;
+        if ($data === null) {
+            $data = array('setting' => array(), 'group' => array());
+            if (vb_lang_current() === 'zh') {
+                $file = __DIR__ . '/lang_zh_titles.php';
+                if (is_file($file)) {
+                    $loaded = include $file;
+                    if (is_array($loaded)) {
+                        $data = $loaded + $data;
+                    }
+                }
+            }
+        }
+        return isset($data[$kind][$key]) ? $data[$kind][$key] : $fallback;
+    }
+
+    function vbsetting_title($varname, $title)
+    {
+        return vbsetting_label('setting', $varname, $title);
+    }
+
+    function vbsettinggroup_title($name)
+    {
+        return vbsetting_label('group', $name, $name);
+    }
+
     /** Build a ?lang=xx URL that keeps the current path and query. */
     function vb_lang_url($lang)
     {
