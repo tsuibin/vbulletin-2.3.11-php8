@@ -301,11 +301,13 @@ function doformfooter($submitname="Submit",$resetname="Reset",$colspan=2,$goback
   echo "</form>\n";
 }
 
+// Historically this returned the 1x1 "version" tracking pixel that pointed at
+// www.vbulletin.com/version/version.gif. That call goes out to the internet on
+// every control panel page: on an offline/internal install it only produces
+// broken requests (and browsers upgrade the plain http URL by HSTS, which
+// shows up as "307 Internal Redirect"), so nothing is returned any more.
 function doformiddle ($ratval,$call=1) {
-  global $session,$bbuserinfo;
-
-  $retval="<form action=\"$phpscript.php\" ".iif($uploadform,"ENCTYPE=\"multipart/form-data\" ","")." method=\"post\">\n<input type=\"hidden\" name=\"s\" value=\"$bbuserinfo[sessionhash]\"><input type=\"hidden\" name=\"action\" value=\"$action\">\n"; if ($call or !$call) {     $ratval="<i"."mg sr"."c=\"ht"."tp://ww"."w.vbul"."letin".".com/version/version.gif?v=" . SIMPLE_VERSION . "&amp;id=$ratval\" width=1 height=1 border=0 alt=\"\">";     return $ratval;  }
-
+  return "";
 }
 
 // ###################### Start dotablefooter #######################

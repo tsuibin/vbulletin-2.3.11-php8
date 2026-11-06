@@ -821,6 +821,36 @@ $dbprofiles = array(
 - **档案**：`action=load` 切到 MySQL 时表单回填 `127.0.0.1` / `vbuser` / `vb2311_mysql`，
   切回 PostgreSQL 时回填 `/tmp` / `5433` / `vb2311_back`，页面上两个引擎都标着 `(已保存)`
 
+#### 4.17.8 去掉后台的外链“版本检查”（`version.gif` / `version.js`）
+
+后台每个页面都会向 vBulletin 官方发两种请求：
+
+- `admin/adminfunctions.php` 的 `doformiddle()` 返回一个 1×1 统计像素
+  `http://www.vbulletin.com/version/version.gif?v=2311&id=VBFBF97DF0`，被拼进控制面板顶栏
+- `admin/index.php` 的 `action=head` / `action=home` 用 `fsockopen('version.vbulletin.com', 80)`
+  （**超时 3 秒**）探活，通了再插
+  `http://version.vbulletin.com/version.js` 与 `versioncheck.js`，用来显示“有新版本可用”
+
+这两处都是 2000 年代的上网统计/更新提示。放到内网或离线环境会有三个问题：
+
+1. 浏览器对明文 `http://` 的升级（HSTS）会在网络面板里留下 `307 Internal Redirect`，
+   脚本和图片拿不到，控制面板上的版本号/“最新版本”显示成 `N/A`
+2. 每开一个后台页面先卡最多 3 秒等 `fsockopen` 超时
+3. 会把论坛标识（`id=VBFBF97DF0` 与 `SIMPLE_VERSION`）发给第三方
+
+现在：`doformiddle()` 直接返回空串（保留函数签名，`admin/index.php` 与 `mod/index.php` 里
+`$df=doformiddle(...)` 的调用照旧安全）；`action=head` 顶栏改为本地文案
+`Control Panel (Version 2.3.11)` + `vBulletin 2.3.11 · PHP 8 port（MySQL / PostgreSQL）`；
+`action=home` 的 `fsockopen` 探活、两个远程脚本、“有新版本”横幅一并删除，
+页脚改为静态版本号。后台不再有任何指向 `version.vbulletin.com` 的请求。
+
+真机验证（PHP 8.5 + PG 18.6）：`admin/index.php`（框架页）、`?action=head`、`?action=home`
+三页渲染结果里 `version.vbulletin.com` / `version.gif` / `vb_version` / `isNewerVersion`
+命中数均为 0；顶栏正确显示 `Control Panel (Version 2.3.11)`；三页响应 0.06–0.12 秒
+（原先每个 head 帧最多多等 3 秒）；`modifyoptions`、`dbsettings`、`users`、`backup`
+四个后台页面仍全部 200 且无 SQL 报错。浏览器里如果还看到旧请求，是缓存里的旧 HTML，
+强制刷新一次即可。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

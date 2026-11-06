@@ -67,30 +67,21 @@ if ($loc!="") {
 }
 
 if ($action=="head") {
-	$fp = @fsockopen('version.vbulletin.com', 80, $errno, $errstr, 3);
+	// The version banner used to pull version.js from version.vbulletin.com
+	// over plain http, guarded by a 3 second fsockopen: on a machine without
+	// internet access that meant a 3 s stall on every control panel page plus
+	// an HSTS "307 Internal Redirect" for the script. Both are gone now, the
+	// panel shows its own version number instead.
 	$headjs = '';
-	if ($fp)
-	{
-		fclose($fp);
-		$headjs = '<script type="text/javascript" src="http://version.vbulletin.com/version.js?v=' . SIMPLE_VERSION . '&amp;id=VBFBF97DF0"></script>';
-	}
 ?>
 <html><head><link rel="stylesheet" href="../cp.css">
 <?php echo $headjs; ?>
 </head>
 <body leftmargin="10" topmargin="0" marginwidth="0" marginheight="0" id="navbody">
-<script type="text/javascript">
-	<!--
-	if (typeof(vb_version) == "undefined")
-	{
-		vb_version = 'N/A';
-	}
-	// -->
-	</script>
 <table border="0" width="100%" height="100%">
 <tr valign="middle">
 	<td><a href="http://www.vbulletin.com/" target="_blank">Control Panel (Version <?php echo $versionnumber.doformiddle("VBFBF97DF0"); ?>)</a></td>
-	<td align="center"><a href="http://vbulletin.com/members/" target="_blank">Latest version of vBulletin available is <script language="javascript" type="text/javascript">document.write(vb_version);</script>.</a></td>
+	<td align="center">vBulletin <?php echo $versionnumber; ?> &middot; PHP 8 port with MySQL / PostgreSQL support</td>
 	<td align="right"><b><a href="../index.php?s=" target="_blank">Go to your Forums Home Page</a></b></TD>
 </tr>
 </table>
@@ -106,25 +97,10 @@ cpheader("<script language=\"javascript\" type=\"text/javascript\"> function jum
 <font size='1'>Software Developed by <a href="http://www.jelsoft.com/">Jelsoft Enterprises Limited</a></font></p>
 
 <?php
-$fp = @fsockopen('version.vbulletin.com', 80, $errno, $errstr, 3);
-if ($fp)
-{
-	fclose($fp);
-?>
-
-<script language="javascript" type="text/javascript" src="http://version.vbulletin.com/versioncheck.js"></script>
-<script language="javascript" type="text/javascript" src="http://version.vbulletin.com/version.js?v=<?php echo SIMPLE_VERSION; ?>&amp;id=VBFBF97DF0"></script>
-<script language="Javascript" type="text/javascript">
-<!--
-if (typeof(vb_version) != "undefined" && isNewerVersion("<?php echo $templateversion; ?>", vb_version)) {
-	document.write("<div align=\"center\" class=\"tblhead\" style=\"padding:4px\"><b><a href=\"http://vbulletin.com/forum/showthread.php?postid="+vb_announcementid+"\"><span class=\"tblhead\"><font size=\"2\">There is a newer version of vBulletin than the version you are running!</font></span></a></b>");
-	document.write("<br><a href=\"http://vbulletin.com/members/\"><span class=\"tblhead\">Download vBulletin version "+vb_version+" from the Members' Area</span></a>.</div>");
-}
-//-->
-</script>
-
-<?php
-}
+// The "is there a newer version" banner came from version.vbulletin.com
+// (plain http + a 3 second fsockopen probe). Offline installs only saw a stalled
+// page and an HSTS "307 Internal Redirect" for the scripts, and the check
+// itself leaks the board id to a third party, so it is removed.
 ?>
 
 <p><font size='1'>From here, you can control all aspects of your vBulletin forums.
@@ -228,21 +204,7 @@ echo "</table></td></tr></table></form>\n";
 ?>
 
 <p align="center"><font size='1'>&copy;2000 - <?php echo date('Y'); ?> Jelsoft Enterprises Ltd.<br>
-<script language="javascript" type="text/javascript">
-<!--
-if (typeof(vb_version) != "undefined")
-{
-	if (isNewerVersion("<?php echo $templateversion; ?>", vb_version))
-	{
-		document.write("Latest version of vBulletin available: <a href=\"http://vbulletin.com/forum/showthread.php?postid="+vb_announcementid+"\">"+vb_version+"</a>; Your version: <?php echo $templateversion; ?>.");
-	}
-	else
-	{
-		document.write("You are running the latest version of vBulletin (<a href=\"http://vbulletin.com/forum/showthread.php?postid="+vb_announcementid+"\">"+vb_version+"</a>)");
-	}
-}
-//-->
-</script>
+vBulletin <?php echo $templateversion; ?> &middot; PHP 8 port（MySQL / PostgreSQL）
 </font></p>
 </body>
 </html>
