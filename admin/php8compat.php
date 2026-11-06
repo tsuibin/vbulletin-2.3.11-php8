@@ -253,3 +253,34 @@ if (!function_exists('vb_ereg_pattern')) {
         return false;
     });
 }
+
+// ---------------------------------------------------------------------
+// Thumbnail frame for attachment images inside posts.
+//
+// The markup is produced by the postbit_attachmentimage template, which lives
+// in the database (template table), so it cannot be edited for an already
+// installed board without a DB migration. Injecting a small style block from
+// global.php keeps the change in the repository and applies to every install.
+// The selector matches attachment.php URLs only, so smilies, forum icons and
+// avatars are untouched.
+// ---------------------------------------------------------------------
+if (!function_exists('vb_attachment_css')) {
+    function vb_attachment_css()
+    {
+        return <<<'CSS'
+<style type="text/css">
+img[src*="attachment.php"] {
+	border: 1px solid #C6C6D0;
+	padding: 5px;
+	background-color: #FFFFFF;
+	border-radius: 4px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+	box-sizing: border-box;
+	max-width: 100%;
+	height: auto;
+	vertical-align: middle;
+}
+</style>
+CSS;
+    }
+}

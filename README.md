@@ -851,6 +851,44 @@ $dbprofiles = array(
 四个后台页面仍全部 200 且无 SQL 报错。浏览器里如果还看到旧请求，是缓存里的旧 HTML，
 强制刷新一次即可。
 
+#### 4.17.9 帖内附件图片的细边框（`vb_attachment_css()`）
+
+帖子里的图片附件原来是一张“裸图”直接贴在帖子正文里，透明 PNG 会和表格底色混在一起，
+大图还会顶到版心边缘。现在给它加了相框式的细边框。
+
+难点是这段显示由**数据库里的模板** `postbit_attachmentimage` 决定（`template` 表），
+改模板意味着每一套已装好的论坛都要做一次数据库升级。所以规则做在代码里：
+`admin/php8compat.php` 新增 `vb_attachment_css()`，返回一段 `<style>`，由 `global.php` 在
+拼完 `headinclude` 模板**之后**追加进 `$headinclude`（放最后是为了不被模板自带 CSS 覆盖）：
+
+```css
+img[src*="attachment.php"] {
+	border: 1px solid #C6C6D0;
+	padding: 5px;
+	background-color: #FFFFFF;
+	border-radius: 4px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+	box-sizing: border-box;
+	max-width: 100%;
+	height: auto;
+	vertical-align: middle;
+}
+```
+
+- 选择器用 `src` 子串匹配 `attachment.php`，所以只命中附件图；表情、版块图标、头像是
+  `imagesfolder` 下的静态图或被别的脚本输出，不受影响
+- 白色底 + 5px 内边距让透明 PNG/GIF 有“照片”感，1px 灰边 + 轻阴影把图和帖子底色分开
+- `max-width:100%` + `height:auto` + `box-sizing:border-box`：超宽图会等比缩到版心宽度，
+  不会把帖子表格撑出横向滚动条
+
+真机验证（PHP 8.5 + PG 18.6，浏览器实测）：
+
+- 40×30 小图渲染成 52×42、480×300 渲染成 492×312（各方向正好 +5px 内边距 +1px 边框）
+- 1600×900 大图在 1265px 视口里渲染成 1031×585，`scrollWidth == clientWidth`，
+  页面没有横向溢出
+- `showthread.php` / `index.php` / `forumdisplay.php` / `usercp.php` / `private.php` /
+  `memberlist.php` 全部 200
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

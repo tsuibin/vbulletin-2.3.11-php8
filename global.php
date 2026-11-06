@@ -344,6 +344,9 @@ eval(gettemplate('phpinclude',0,0));
 // single-byte encoding for multi-byte content.
 $headinclude = '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">' . "\n";
 eval("\$headinclude .= \"".gettemplate('headinclude')."\";");
+// Attachment images get a thin frame (see vb_attachment_css()). Appended after
+// the template's own CSS so it is not overridden by it.
+$headinclude .= vb_attachment_css() . "\n";
 eval("\$header .= \"".gettemplate('header')."\";");
 eval("\$footer .= \"".gettemplate('footer')."\";");
 
