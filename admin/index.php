@@ -344,6 +344,7 @@ makenavoption("Modify","bbcode.php?action=modify");
 makenavselect("Custom vB Codes","<hr>");
 // *************************************************
 makenavoption("Back-up Database","backup.php?action=choose","<br>");
+makenavoption("Database Settings","dbsettings.php?action=modify","<br>");
 makenavoption("BB Import Systems","bbimport.php?action=","<br>");
 makenavoption("Update Counters","misc.php?action=chooser");
 makenavselect("Import & Maintenance");

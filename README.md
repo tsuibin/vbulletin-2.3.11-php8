@@ -662,6 +662,37 @@ UPDATE LOW_PRIORITY session SET lastactivity=... WHERE sessionhash='...'  -- adm
 `relation "low_priority" does not exist`；改后访问同一主题，`thread.views` 7 → 8、
 `attachment.counter` 3 → 4，日志不再出现该报错。
 
+#### 4.17.4 后台切换数据库（`admin/dbsettings.php`）
+
+后台 **Import & Maintenance → Database Settings** 可以选 MySQL 还是 PostgreSQL，不用再手改
+`admin/config.php`。选型必须落在文件里而不是库里——要读库里的设置，得先知道该连哪个库。
+
+字段：数据库类型、主机、端口、schema（仅 PG）、用户名、密码、库名、持久连接。页面显示的
+当前值直接解析自 `admin/config.php` 本身，所以看到的一定是下一个请求会用的值。
+
+保存流程是**先测后写**：
+
+- `Test connection` 用提交的参数新建一条连接：PG 侧报版本、schema 和该 schema 的表数，
+  MySQL 侧报版本和表数；两边都会检查 `user` / `setting`（MySQL 再查 `forum`）这些核心表在不在
+- 连不通就只显示错误，**不写配置**（PHP 8.1+ 的 mysqli 默认抛异常，页面里用
+  `mysqli_report(MYSQLI_REPORT_OFF)` 关掉，错误以文本呈现而不是 Fatal error）
+- `Save settings` 才改写 `admin/config.php`：只替换这 8 个 `$db*` / `$servername` 赋值，其余内容
+  （`$technicalemail`、`$canviewadminlog` 等）原样保留；旧写法 `$dbport = 5433;`（不带引号）也能识别，
+  统一重写成规范形式
+- 改写前先 `copy` 成 `config.php.bak.YYYYMMDD-HHMMSS`；写之前用
+  `token_get_all($text, TOKEN_PARSE)` 校验生成结果是合法 PHP，不合法则放弃并保留原文件
+- 保存后下一个请求即生效，不必重启（开了 opcache 的 FPM 建议 reload 一次）
+
+代价与回退：新配置连不上时前台会打不开，把最近的 `config.php.bak.*` 覆盖回 `config.php` 即可，
+页面上也写了这句。切换引擎不会迁移数据——目标库必须先有 vB 的表（跑安装器，或用 4.17.1 的
+导出再 `psql -f` 导入）。
+
+真机验证（PG 18.6 站点 + PHP 8.5）：页面正确列出当前 PG 配置；`Test connection` 对
+`host=/tmp port=5433 dbname=vb2311 schema=public` 报“已连接 PostgreSQL 18.6、40 张表”；
+库名写错报连接失败；`Save settings` 成功改写并留备份，改写后 `php -l` 通过、站点 200；
+改到 `dbservertype=mysql`（本机无 MySQL）时给出 `MySQL 连接失败：Connection refused`，
+配置未被写入，站点仍 200。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
