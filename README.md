@@ -693,6 +693,34 @@ UPDATE LOW_PRIORITY session SET lastactivity=... WHERE sessionhash='...'  -- adm
 改到 `dbservertype=mysql`（本机无 MySQL）时给出 `MySQL 连接失败：Connection refused`，
 配置未被写入，站点仍 200。
 
+#### 4.17.5 二进制附件与 `escape()`（`is_binary()`）
+
+发帖带附件时 `newreply.php` 会崩在 `pg_escape_string()`：
+
+```
+Fatal error: Uncaught ValueError: pg_escape_string(): Argument #2 ($string)
+Escaping string failed in admin/db_pgsql.php
+```
+
+原因是 `acceptupload()` 把上传的图片原样交给 `vb_escape()` → `escape()`，而
+`pg_escape_string()` 只接受合法的 UTF-8 文本；PNG 的字节（`\x89`、`\0`）一进去 PHP 8 直接抛
+`ValueError`（PHP 5/7 只是 warning，所以老版本没暴露）。
+
+`escape()` 现在先判类型，两条路分开走：
+
+- **二进制**（含 NUL 字节，或 `mb_check_encoding(..., 'UTF-8')` 为假）→ 返回
+  `\\x<bin2hex>`：`rewrite_string_literals()` 会把 `\\` 还原成 `\`，语句里最终是
+  `'\x89504e47...'`，正好是 PostgreSQL 的 bytea 十六进制字面量
+- **文本** → 仍是 `pg_escape_string()`，但把结果里的反斜杠再翻倍一次。因为连接里
+  `standard_conforming_strings=on`，`pg_escape_string()` 只翻倍单引号、不动反斜杠，
+  而 `rewrite_string_literals()` 会把裸 `\x` 当成 MySQL 转义吃掉一个字符——翻倍后
+  它正好吃到那一对 `\\`、还原出一个 `\`
+
+真机验证（PG 18.6）：`vb_escape()` 处理 1483 字节的 PNG → 写入 `attachment.filedata`
+（bytea）→ `octet_length` 1483、读回逐字节相同；`WHERE filedata='<同值>'`（acceptupload
+的重复检测）能命中自己；`attachment.php` 取出后 `file` 认作 `PNG image data, 48 x 48`、
+`cmp` 与源文件一致。文本侧 `中文'quote"反斜杠\结尾`、emoji、`%` 与 `_` 五种样例进出等长等值。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

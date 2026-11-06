@@ -121,11 +121,43 @@ class DB_Sql_vb {
   }
 
   // Charset-aware quoting of a value for inclusion in a SQL string literal.
+  // Binary payloads (uploaded attachments and avatars, stored in bytea columns)
+  // cannot go through pg_escape_string(): PHP 8 raises a ValueError as soon as
+  // the bytes are not valid UTF-8. They are handed back in PostgreSQL's bytea
+  // hex form instead -- the caller already wraps the result in quotes, so
+  // '\x89504e47...' becomes a valid bytea literal.
   function escape($value) {
-    if ($this->is_linked()) {
-      return pg_escape_string($this->link_id, (string) $value);
+    $value = (string) $value;
+    if ($this->is_binary($value)) {
+      // Two backslashes on purpose: rewrite_string_literals() turns "\\" into
+      // "\" while converting the literal to PostgreSQL rules, so the statement
+      // ends up with the single "\x..." bytea needs.
+      return '\\\\x' . bin2hex($value);
     }
-    return addslashes((string) $value);
+    if ($this->is_linked()) {
+      // pg_escape_string() only doubles quotes (standard_conforming_strings is
+      // pinned on in connect()), so a literal backslash would reach
+      // rewrite_string_literals() as an escape and get eaten. Doubling here
+      // gives that rewrite its "\\" -> "\" pair to work on.
+      $escaped = pg_escape_string($this->link_id, $value);
+      return str_replace('\\', '\\\\', $escaped);
+    }
+    return addslashes($value);
+  }
+
+  // True when the bytes cannot be part of a UTF-8 text value: invalid UTF-8,
+  // or a NUL byte (which no PostgreSQL text type accepts either).
+  private function is_binary($value) {
+    if ($value === '') {
+      return false;
+    }
+    if (strpos($value, "\0") !== false) {
+      return true;
+    }
+    if (function_exists('mb_check_encoding')) {
+      return !mb_check_encoding($value, 'UTF-8');
+    }
+    return !preg_match('//u', $value);
   }
 
   function select_db($database="") {
