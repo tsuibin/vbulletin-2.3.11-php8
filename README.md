@@ -587,8 +587,9 @@ free_result / query_first / data_seek / num_rows / num_fields / insert_id / clos
    没有挡住这些路径的 SQL，缺的是文件。
 2. **`GROUP BY` 严格模式**：PG 要求 SELECT 里所有非聚合列都出现在 `GROUP BY`，MySQL 不要求。
    已跑过的页面没有触发，但论坛统计、日历、版块聚合这类查询没有逐条排查。
-3. **整型列与空串比较**：`WHERE userid=''` 在 MySQL 里恒为假、在 PG 里报
-   `invalid input syntax for integer`。代码里主要走 PHP 判空，未系统性排查。
+3. **数字列与非数字字符串比较**：`WHERE userid=''` 这类已在驱动层修掉（`rewrite_empty_numeric()`，
+   见 4.17.2），但把数字列和 `'abc'` 这种非空串比较仍会报 `invalid input syntax`。代码里没见到
+   这种写法，未逐个排查。
 4. 全文检索 / `searchindex` 的分词逻辑未按 PG 调整（`REPLACE INTO` 在该表上按无主键处理，
    退化成了普通 INSERT，与 MySQL 行为一致）。
 5. 排序与大小写：`ORDER BY` 在 MySQL 默认 ci、PG 按字节序，中文/英文混排顺序会不一致。
@@ -613,6 +614,27 @@ PG 侧的 schema 不从 `SHOW FIELDS` 拼（那个 shim 只给得出 PG 类型�
 真机验证（PostgreSQL 18.6）：页面「SQL Dump」导出 40 张表、614 KB，`psql` 导入空库
 **0 报错**、表数 40、模板/设置/设置组/替换集/用户行数与源库逐一相同，还原库 `index.php`
 正常出页（200，内容与源库一致）；自增序列续接正确。「保存到服务器文件」与 CSV 导出同样跑通。
+
+#### 4.17.2 数字列与空串比较（`rewrite_empty_numeric()`）
+
+vB2 里大量 `WHERE userid=''` 的写法（会话查不到人时 `$bbuserinfo[userid]` 就是空串，
+`usercp.php`、`member.php` 都会拼出这种条件）。MySQL 会把 `''` 当 0 比较，所以条件等价于
+`userid=0`；PostgreSQL 直接报 `invalid input syntax for type bigint: ""` 把整页打挂。
+
+驱动在 `translate()` 里改写这种比较，**只对确实是数字类型的列生效**：
+
+- 列类型来自 `information_schema.columns`（`column_info()` 已经按表缓存，每页只查一次）
+- 表/别名从语句的 `FROM`、`JOIN`、`UPDATE` 里解析；同一列在多张表里类型不一致时不动
+- `col = ''` → `col = 0`，`<> ''` / `!= ''` → `<> 0`，`> ''` → `> 0`，`>= ''` → `>= 0`，
+  `< ''` → `< 0`，`<= ''` → `<= 0`，`<=> ''` → `= 0`（与 MySQL 的隐式转换等价）
+- 文本列**不改**：`username=''` 仍然匹配空字符串（驱动靠类型判断区分，不是靠列名猜）
+- 匹配只在代码位置生效，字符串字面量里的 `=` 不会被误改
+
+真机验证（PostgreSQL 18.6）：改前 `usercp.php?s=` 直接返回 Database error
+（`invalid input syntax for type bigint: ""`）；改后 `usercp.php`、`member.php`、
+`memberlist.php`、`private.php`、`search.php`、`online.php`、`calendar.php`、
+`index.php`、`forumdisplay.php`、`showthread.php`、`register.php` 全部 200 且无 SQL 报错，
+文本列 `=''` 的语义与原来一致。
 
 ## 5. 运行要求
 

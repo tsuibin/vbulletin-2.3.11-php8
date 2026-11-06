@@ -311,6 +311,7 @@ class DB_Sql_vb {
     }
 
     $sql = $this->rewrite_from_joins($sql);
+    $sql = $this->rewrite_empty_numeric($sql);
     $sql = $this->rewrite_limit($sql);
     $sql = $this->rewrite_if($sql);
     $sql = $this->rewrite_isnull($sql);
@@ -382,6 +383,101 @@ class DB_Sql_vb {
         // Unterminated literal: keep the rest verbatim instead of mangling it.
         return $sql;
       }
+    }
+    return $out;
+  }
+
+  // MySQL casts '' to 0 when comparing it with a number, so "WHERE userid=''"
+  // means "userid=0" there; PostgreSQL rejects the literal outright with
+  // "invalid input syntax for type bigint". vB2 leans on this whenever a
+  // session lookup ends up with an empty userid. Rewrite only when the column
+  // is genuinely numeric -- text columns must keep matching the empty string,
+  // so the types come from the catalog.
+  private function rewrite_empty_numeric($sql) {
+    $tables = $this->referenced_tables($sql);
+    if (!$tables) {
+      return $sql;
+    }
+    $self = $this;
+    // Not replace_outside_quotes(): it splits the statement at literals, so the
+    // '' this rewrite is looking for would be cut off from the column on its
+    // left. Scan the whole statement and skip matches that start inside a string.
+    $offset = 0;
+    $guard = 0;
+    $pattern = "/\\b([A-Za-z_][\\w\\$]*(?:\\.[A-Za-z_][\\w\\$]*)?)\\s*(<=>|<>|!=|>=|<=|=|<|>)\\s*''/i";
+    while ($guard++ < 200) {
+      if (!preg_match($pattern, $sql, $m, PREG_OFFSET_CAPTURE, $offset)) {
+        break;
+      }
+      $start = $m[0][1];
+      $length = strlen($m[0][0]);
+      if (!$this->at_code_position($sql, $start)) {
+        $offset = $start + 1;
+        continue;
+      }
+      $replacement = $self->empty_numeric_compare($m[1][0], $m[2][0], $tables);
+      if ($replacement === null) {
+        $offset = $start + $length;
+        continue;
+      }
+      $sql = substr($sql, 0, $start) . $replacement . substr($sql, $start + $length);
+      $offset = $start + strlen($replacement);
+    }
+    return $sql;
+  }
+
+  // Returns the replacement for "column = ''" when the column is numeric, or
+  // null when the comparison has to stay as written.
+  public function empty_numeric_compare($lhs, $op, $tables) {
+    if ($op == '<=>') {
+      $op = '=';
+    }
+    $qualifier = "";
+    $column = $lhs;
+    $dot = strpos($lhs, '.');
+    if ($dot !== false) {
+      $qualifier = substr($lhs, 0, $dot);
+      $column    = substr($lhs, $dot + 1);
+    }
+
+    $types = array();
+    foreach ($tables as $alias => $table) {
+      if ($qualifier != "" && strcasecmp($qualifier, $alias) != 0 && strcasecmp($qualifier, $table) != 0) {
+        continue;
+      }
+      $info = $this->column_info($table);
+      if (isset($info[$column])) {
+        $types[] = $info[$column]['type'];
+      }
+    }
+    if (!$types) {
+      return null;
+    }
+    $numeric = array('integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real', 'oid');
+    foreach ($types as $type) {
+      if (!in_array($type, $numeric)) {
+        return null; // text column: '' stays a real value
+      }
+    }
+    return $lhs . " " . $op . " 0";
+  }
+
+  // Tables (and their aliases) a statement reads from, as alias => table.
+  private function referenced_tables($sql) {
+    $out = array();
+    if (!preg_match_all('/\b(?:FROM|JOIN|UPDATE)\s+([A-Za-z_][\w$]*)(?:\s+(?:AS\s+)?([A-Za-z_][\w$]*))?/i', $sql, $sets, PREG_SET_ORDER)) {
+      return $out;
+    }
+    $keywords = array('on', 'where', 'left', 'right', 'inner', 'outer', 'join', 'using', 'set',
+                      'group', 'order', 'limit', 'as', 'and', 'or', 'having', 'union');
+    foreach ($sets as $set) {
+      $table = strtolower($set[1]);
+      $alias = (isset($set[2]) && $set[2] != "") ? strtolower($set[2]) : $table;
+      if (in_array($alias, $keywords)) {
+        $alias = $table;
+      }
+      $out[$alias] = $table;
+      $out[$table] = $table;
     }
     return $out;
   }
@@ -988,7 +1084,7 @@ class DB_Sql_vb {
     return $chosen;
   }
 
-  // position => array(name, serial), cached per request.
+  // position => array(name, serial, type), cached per request.
   private function column_info($table) {
     if (isset($this->column_cache[$table])) {
       return $this->column_cache[$table];
@@ -997,7 +1093,7 @@ class DB_Sql_vb {
     if (!($this->is_linked())) {
       return array();
     }
-    $sql = "SELECT column_name, column_default, ordinal_position FROM information_schema.columns " .
+    $sql = "SELECT column_name, column_default, ordinal_position, data_type FROM information_schema.columns " .
            "WHERE table_schema = " . $this->quote_literal($this->schema) .
            " AND table_name = " . $this->quote_literal($table) . " ORDER BY ordinal_position";
     $res = @pg_query($this->link_id, $sql);
@@ -1007,7 +1103,7 @@ class DB_Sql_vb {
     $info = array();
     while ($row = pg_fetch_row($res)) {
       $serial = (strpos((string) $row[1], 'nextval(') === 0);
-      $info[$row[0]] = array('name' => $row[0], 'serial' => $serial, 'pos' => (int) $row[2]);
+      $info[$row[0]] = array('name' => $row[0], 'serial' => $serial, 'pos' => (int) $row[2], 'type' => $row[3]);
     }
     pg_free_result($res);
     $this->column_cache[$table] = $info;
