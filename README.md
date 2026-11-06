@@ -964,6 +964,59 @@ pgsql error: ERROR:  syntax error at or near "IGNORE"
   由 3 行涨到 7 行（新词入表）；`showthread` / `editpost` / `search.php` / `index` /
   `forumdisplay` 全 200
 
+#### 4.17.12 `REPLACE INTO` → upsert / `DO NOTHING`（含唯一索引探测）
+
+编辑帖子保存时又报一次：
+
+```
+Invalid SQL: REPLACE INTO searchindex (wordid,postid,intitle)
+              SELECT DISTINCT wordid,4,1 FROM word WHERE title IN('帖��123')
+(translated to PostgreSQL: INSERT INTO searchindex (...) SELECT DISTINCT ...)
+pgsql error: ERROR:  duplicate key value violates unique constraint "searchindex_wordid"
+DETAIL:  Key (wordid, postid)=(5, 4) already exists.
+```
+
+`REPLACE INTO` 是 MySQL 的「撞唯一键就先删旧行再插新行」，PostgreSQL 里对应
+`INSERT ... ON CONFLICT ... DO UPDATE`（upsert）。旧的 `rewrite_replace_into()`
+已经有这层改写，但它在判断「这张表有没有唯一键」时查的是
+`information_schema.table_constraints`——而 `searchindex` 的唯一键在有的库里是
+安装器用 `CREATE UNIQUE INDEX` 建的**唯一索引**，不是约束，于是查不到、被当成
+「无唯一键的表」退化成普通 `INSERT`，撞键就炸。报错里的约束名
+`searchindex_wordid`（而不是 `..._pkey` / `..._key`）正是这一特征。
+
+改法两处：
+
+1. 新增 `unique_key_groups($table)`：直接读系统目录
+   `pg_class` / `pg_index` / `pg_attribute`（`unnest(i.indkey) WITH ORDINALITY`），
+   把该表**所有** `indisunique` 且 `indisvalid` 的索引列组列出来，主键排最前，
+   唯一索引与唯一约束都能拿到，与它们的命名无关；按请求缓存。
+   `conflict_target()` 改为取它的第一组，保持原有调用点不变。
+2. `rewrite_replace_into()` 按语句形状分流：
+   - **单行** `REPLACE ... VALUES (...)`：仍是真 upsert，冲突目标优先选「列清单里
+     全包含的那一组唯一键」，其余列 `= EXCLUDED.列`。这条路径保证 `adminutil`
+     （`title` 是主键、`text` 要覆盖）语义不变。
+   - **批量**（`VALUES` 有多个元组）或 `REPLACE ... SELECT`：改用
+     `ON CONFLICT (...) DO NOTHING`。原因是同一语句里可能出现两次同一个键，
+     PostgreSQL 对 `DO UPDATE` 会报 "cannot affect row a second time"，而
+     `updatewords()` 在重写索引前已经 `unindexpost()` 删过旧行，`DO NOTHING`
+     得到的结果与 MySQL 一致且幂等；只有一组唯一键时仍给出显式冲突目标。
+   - 表上确实没有任何唯一键：维持原来的普通 `INSERT`（否则 PG 报
+     "no unique constraint"）。
+
+真机验证（PHP 8.5 + PG 18.6）：
+
+- 报错原句 `REPLACE ... SELECT DISTINCT ...` →
+  `INSERT INTO searchindex (wordid,postid,intitle) SELECT DISTINCT ... ON CONFLICT (wordid,postid) DO NOTHING`，
+  重复执行两次均成功（幂等）
+- 批量 VALUES 且自带重复键 `VALUES (6,4,0),(6,4,0),(7,4,0)` → 翻译同上，执行成功
+- 单行 `REPLACE INTO adminutil (title,text) VALUES ('t_rep','v1')` 后再插 `'v2'` →
+  `DO UPDATE SET text = EXCLUDED.text`，查回 `v2`，覆盖语义正确
+- 带分号的语句：`ON CONFLICT` 插在分号前
+- 走页面：`editpost.php?s=...&action=editpost&postid=900001` 把标题改成
+  `编辑测试 帖123` 提交 → 返回「The post has been successfully edited」，post 表已更新，
+  `searchindex` 里该帖 9 行且全表无重复 `(wordid,postid)`，`showthread` 200
+
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

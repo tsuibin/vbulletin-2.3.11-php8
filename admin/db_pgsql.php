@@ -41,6 +41,8 @@ class DB_Sql_vb {
   // only upserts when the table actually has a unique key -- searchindex has
   // none, and then REPLACE degrades to a plain INSERT.
   public $key_cache = array();
+  // Same idea, but keeps every unique key of a table (see unique_key_groups()).
+  public $key_groups_cache = array();
 
   // Cache of information_schema lookups: table => array(position => array(name, serial))
   public $column_cache = array();
@@ -888,12 +890,42 @@ class DB_Sql_vb {
   // row, which is the closest PostgreSQL equivalent. Used by the search-index
   // writer (word / searchindex) and by the importer.
   private function append_conflict_do_nothing($sql) {
+    return $this->append_conflict_clause($sql, 'ON CONFLICT DO NOTHING');
+  }
+
+  // Append an ON CONFLICT clause, keeping any trailing semicolon at the very end.
+  private function append_conflict_clause($sql, $clause) {
     $tail = '';
     if (preg_match('/;\s*$/', $sql)) {
       $sql = preg_replace('/;\s*$/', '', $sql);
       $tail = ';';
     }
-    return rtrim($sql) . ' ON CONFLICT DO NOTHING' . $tail;
+    return rtrim($sql) . ' ' . $clause . $tail;
+  }
+
+  // How many (...) tuples follow VALUES -- 1 for a single row, more for the
+  // bulk form updatewords() builds.
+  private function count_value_tuples($rest) {
+    if (!preg_match('/^\s*VALUES\s+(.*)$/is', $rest, $m)) {
+      return 0;
+    }
+    $body = $m[1];
+    $count = 0;
+    $pos = 0;
+    $len = strlen($body);
+    while ($pos < $len) {
+      $open = strpos($body, '(', $pos);
+      if ($open === false) {
+        break;
+      }
+      $close = $this->matching_paren($body, $open);
+      if ($close === false) {
+        break;
+      }
+      $count++;
+      $pos = $close + 1;
+    }
+    return $count;
   }
 
   // REPLACE INTO t (a,b,c) VALUES ... -> INSERT INTO t (a,b,c) VALUES ...
@@ -910,17 +942,52 @@ class DB_Sql_vb {
         $cols[] = trim($c);
       }
     }
+    $head = "INSERT INTO " . $table .
+            ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " ";
 
     // MySQL's REPLACE is delete-by-key-then-insert, and only does that when the
-    // table has a unique key. searchindex in this schema has none, so REPLACE
-    // there is a plain INSERT -- adding ON CONFLICT would be a "no unique
-    // constraint" error in PostgreSQL.
-    $pk = $this->conflict_target($table);
-    if (!$pk) {
-      return "INSERT INTO " . $table . ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " " . $rest;
+    // table has a unique key. No unique key at all means REPLACE is a plain
+    // INSERT, and adding ON CONFLICT would be a "no unique constraint" error.
+    $groups = $this->unique_key_groups($table);
+    if (!$groups) {
+      return $head . $rest;
     }
 
-    $conflict = " ON CONFLICT (" . implode(',', $pk) . ")";
+    // Bulk shapes (REPLACE ... SELECT, or VALUES with several tuples) can hand
+    // PostgreSQL the same key twice inside one statement, and DO UPDATE then
+    // aborts with "cannot affect row a second time". vB deletes the affected
+    // searchindex rows before re-inserting (unindexpost), so DO NOTHING leaves
+    // the same visible state and stays idempotent. A single-group target is
+    // still passed when it is unambiguous, so the arbiters match exactly.
+    $is_select = (bool)preg_match('/^(SELECT|DISTINCT|WITH)\b/i', ltrim($rest));
+    if ($is_select || $this->count_value_tuples($rest) > 1) {
+      $target = (count($groups) == 1) ? " (" . implode(',', $groups[0]) . ")" : "";
+      return $this->append_conflict_clause(
+        $head . $rest,
+        "ON CONFLICT" . $target . " DO NOTHING"
+      );
+    }
+
+    // Single row: a real upsert. Prefer the unique key the statement actually
+    // targets (its columns are all present in the column list), else the
+    // primary key / first unique key.
+    $pk = $groups[0];
+    if ($cols) {
+      foreach ($groups as $g) {
+        $covered = true;
+        foreach ($g as $gc) {
+          if (!in_array($gc, $cols)) {
+            $covered = false;
+            break;
+          }
+        }
+        if ($covered) {
+          $pk = $g;
+          break;
+        }
+      }
+    }
+
     $sets = array();
     if ($cols) {
       foreach ($cols as $c) {
@@ -930,7 +997,7 @@ class DB_Sql_vb {
         $sets[] = $c . " = EXCLUDED." . $c;
       }
     } else {
-      // REPLACE ... SELECT: no column list, use the table's own columns.
+      // REPLACE ... VALUES without a column list: use the table's own columns.
       foreach ($this->column_names($table) as $c) {
         if (in_array($c, $pk)) {
           continue;
@@ -938,9 +1005,11 @@ class DB_Sql_vb {
         $sets[] = $c . " = EXCLUDED." . $c;
       }
     }
+
+    $conflict = "ON CONFLICT (" . implode(',', $pk) . ")";
     $conflict .= $sets ? " DO UPDATE SET " . implode(', ', $sets) : " DO NOTHING";
 
-    return "INSERT INTO " . $table . ($m[3] != "" ? " (" . implode(',', $cols) . ")" : "") . " " . $rest . $conflict;
+    return $this->append_conflict_clause($head . $rest, $conflict);
   }
 
   // "INSERT INTO t VALUES (NULL, ...)" -- MySQL reads a NULL in an
@@ -1350,45 +1419,60 @@ class DB_Sql_vb {
   // Columns of the table's PRIMARY KEY, or of its first UNIQUE constraint, or
   // an empty array when the table has no unique key at all.
   private function conflict_target($table) {
-    if (isset($this->key_cache[$table])) {
-      return $this->key_cache[$table];
+    $groups = $this->unique_key_groups($table);
+    return $groups ? $groups[0] : array();
+  }
+
+  // Column lists of every unique key on $table: primary key first, then the
+  // unique indexes/constraints. MySQL's REPLACE only reacts to unique keys,
+  // and this port's installer sometimes creates them as plain
+  // CREATE UNIQUE INDEX, which never shows up in
+  // information_schema.table_constraints -- so the catalog is read directly.
+  // Cached per request; returns array() when the table has no unique key.
+  private function unique_key_groups($table) {
+    if (isset($this->key_groups_cache[$table])) {
+      return $this->key_groups_cache[$table];
     }
-    $this->key_cache[$table] = array();
+    $this->key_groups_cache[$table] = array();
     if (!($this->is_linked())) {
       return array();
     }
-    $sql = "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name " .
-           "FROM information_schema.table_constraints tc " .
-           "JOIN information_schema.key_column_usage kcu " .
-           "  ON kcu.constraint_name = tc.constraint_name " .
-           " AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name " .
-           "WHERE tc.table_schema = " . $this->quote_literal($this->schema) .
-           " AND tc.table_name = " . $this->quote_literal($table) .
-           " AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE') " .
-           "ORDER BY kcu.ordinal_position";
+    $sql = "SELECT ic.relname AS index_name, i.indisprimary AS is_primary, " .
+           "       a.attname AS column_name " .
+           "FROM pg_class tc " .
+           "JOIN pg_namespace n ON n.oid = tc.relnamespace " .
+           "JOIN pg_index i ON i.indrelid = tc.oid " .
+           "JOIN pg_class ic ON ic.oid = i.indexrelid " .
+           "JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord) ON true " .
+           "JOIN pg_attribute a ON a.attrelid = tc.oid AND a.attnum = k.attnum " .
+           "WHERE n.nspname = " . $this->quote_literal($this->schema) .
+           " AND tc.relname = " . $this->quote_literal($table) .
+           " AND i.indisunique AND i.indisvalid " .
+           "ORDER BY i.indisprimary DESC, ic.relname, k.ord";
     $res = @pg_query($this->link_id, $sql);
     if (!$this->is_result($res)) {
       return array();
     }
-    $groups = array();
-    while ($row = pg_fetch_row($res)) {
-      $groups[$row[0]]['type'] = $row[1];
-      $groups[$row[0]]['cols'][] = $row[2];
+    $found = array();
+    while ($row = pg_fetch_assoc($res)) {
+      $found[$row['index_name']]['primary'] = ($row['is_primary'] == 't' || $row['is_primary'] == '1');
+      $found[$row['index_name']]['cols'][] = $row['column_name'];
     }
     pg_free_result($res);
 
-    $chosen = array();
-    foreach ($groups as $g) {
-      if ($g['type'] == 'PRIMARY KEY') {
-        $chosen = $g['cols'];
-        break;
-      }
-      if (!$chosen) {
-        $chosen = $g['cols'];
+    $ordered = array();
+    foreach ($found as $g) {
+      if ($g['primary']) {
+        $ordered[] = $g['cols'];
       }
     }
-    $this->key_cache[$table] = $chosen;
-    return $chosen;
+    foreach ($found as $g) {
+      if (!$g['primary']) {
+        $ordered[] = $g['cols'];
+      }
+    }
+    $this->key_groups_cache[$table] = $ordered;
+    return $ordered;
   }
 
   // position => array(name, serial, type), cached per request.
