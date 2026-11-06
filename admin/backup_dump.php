@@ -277,9 +277,10 @@ function pg_dump_table($table, $fp=0) {
       if ($value === null) {
         $values[] = "NULL";
       } elseif ($col['type'] == "bytea") {
-        // bytea comes back as "\x..."; decode() keeps the newline/backslash
-        // handling out of the string literal entirely
-        $values[] = "decode('" . substr($value, 2) . "', 'hex')";
+        // The driver hands bytea back as raw bytes (see decode_bytea_row),
+        // so hex it here: decode() keeps newline/backslash handling out of
+        // the string literal entirely
+        $values[] = "decode('" . bin2hex($value) . "', 'hex')";
       } else {
         $values[] = pg_quote_value($value);
       }

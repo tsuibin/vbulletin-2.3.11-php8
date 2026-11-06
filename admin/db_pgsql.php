@@ -92,6 +92,9 @@ class DB_Sql_vb {
     // quotes rather than adding backslashes -- standard_conforming_strings must
     // stay on, otherwise '\\'' sequences would be re-interpreted.
     @pg_query($this->link_id, "SET standard_conforming_strings = on");
+    // Fixed output format for bytea, so fetch_array() can turn it back into
+    // raw bytes without guessing which format the server picked.
+    @pg_query($this->link_id, "SET bytea_output = 'hex'");
     // Unquoted identifiers fold to lower case on PostgreSQL, which is exactly
     // what the MySQL schema (all lower case table/column names) expects.
     if ($this->schema != "") {
@@ -173,6 +176,9 @@ class DB_Sql_vb {
       // PGSQL_BOTH is the default: the board uses both $row[0] and
       // $row['column'] forms.
       $this->record = pg_fetch_array($this->query_id, NULL, PGSQL_BOTH);
+      if (is_array($this->record)) {
+        $this->record = $this->decode_bytea_row($this->query_id, $this->record);
+      }
     } else {
       if ( !empty($query_string) ) {
         $this->halt("Invalid query id (".$this->query_id.") on this query: $query_string");
@@ -182,6 +188,31 @@ class DB_Sql_vb {
       $this->record = false;
     }
     return $this->record;
+  }
+
+  // pg_fetch_array() hands bytea columns back in PostgreSQL's text output
+  // format ("\xdeadbeef" with bytea_output=hex). The board stores uploaded
+  // images in attachment.filedata / user.avatardata and echoes them straight
+  // to the browser, exactly as the MySQL driver returns raw bytes -- so the
+  // type has to be undone here or every attachment is served as hex text.
+  private function decode_bytea_row($result, $row) {
+    $fields = pg_num_fields($result);
+    for ($i = 0; $i < $fields; $i++) {
+      if (pg_field_type($result, $i) !== 'bytea') {
+        continue;
+      }
+      $name = pg_field_name($result, $i);
+      if (!isset($row[$name]) || !is_string($row[$name])) {
+        continue;
+      }
+      $value = $row[$name];
+      if (substr($value, 0, 2) === '\\x') {
+        $value = hex2bin(substr($value, 2));
+      }
+      $row[$name] = $value;
+      $row[$i] = $value;
+    }
+    return $row;
   }
 
   function free_result($query_id=-1) {
