@@ -721,6 +721,42 @@ Escaping string failed in admin/db_pgsql.php
 的重复检测）能命中自己；`attachment.php` 取出后 `file` 认作 `PNG image data, 48 x 48`、
 `cmp` 与源文件一致。文本侧 `中文'quote"反斜杠\结尾`、emoji、`%` 与 `_` 五种样例进出等长等值。
 
+#### 4.17.6 `DISTINCT` 与 `ORDER BY` 的列不匹配（`rewrite_distinct_order()`）
+
+`search.php`（`showposts=0` 的“只显示主题”模式）会生成这种语句：
+
+```sql
+SELECT DISTINCT thread.threadid FROM thread JOIN forum ON thread.forumid=forum.forumid
+ WHERE thread.visible=1
+ ORDER BY forum.title DESC, thread.lastpost DESC LIMIT 0,10
+```
+
+MySQL 允许 `ORDER BY` 用没出现在 select 列表里的列；PostgreSQL 直接拒绝：
+`for SELECT DISTINCT, ORDER BY expressions must appear in select list`。按 `title` / `forum` 排序时都能复现。
+
+修法是**把原语句包进一层子查询**，结果列不变：
+
+```sql
+SELECT "threadid" FROM (
+  SELECT DISTINCT thread.threadid, forum.title AS _vb_order1, thread.lastpost AS _vb_order2
+   FROM thread JOIN forum … WHERE thread.visible=1
+) AS "_vb_distinct" ORDER BY "_vb_order1" DESC, "_vb_order2" DESC LIMIT 0,10
+```
+
+- 内层：保留 `DISTINCT`，把缺失的排序表达式补进 select 列表并起名 `_vb_orderN`
+- 外层：按原始输出列名投影回去，`ORDER BY` 改用 `_vb_orderN`，`LIMIT` 留在外层
+- 补进去的排序列与去重列是同一行的依赖字段（`thread.lastpost` 依赖 `threadid`、`forum.title` 依赖 `forumid`），去重后的行数不变
+- 只要 `ORDER BY` 的每个表达式都能在 select 列表里找到（比较时忽略大小写与空白），就**原样放行**，不套子查询
+- 解析不了 select 项（比如 `COUNT(*)` 这类无法用列名再投影的表达式）时也原样放行，宁可让 PG 报错也不乱改
+
+真机验证（PG 18.6）：用修复前的 `db_pgsql.php` 访问
+`search.php?action=showresults&searchid=1&sortby=title` 与 `sortby=forum`，两次都返回
+`for SELECT DISTINCT, ORDER BY expressions must appear in select list`；换上新驱动后
+`sortby=title|forum|replies|lastpost` 四种排序全部 200 且无 SQL 报错；帖子模式（`showposts=1`）
+的 `title|forum|lastpost|replies|views|poster` 六种排序同样全部正常。造了 3 个主题、4 条帖子做过
+对照：`ORDER BY thread.lastpost DESC` 出 `902,903,901`，`ORDER BY thread.title ASC` 出
+`902,901,903`，`ORDER BY forum.title DESC` 把另一个版块的主题排在最前，去重后仍是 3 行。
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

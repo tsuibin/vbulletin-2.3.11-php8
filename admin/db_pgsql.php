@@ -405,6 +405,7 @@ class DB_Sql_vb {
     $sql = $this->rewrite_insert_nulls($sql);
     $sql = $this->rewrite_like($sql);
     $sql = $this->rewrite_instr($sql);
+    $sql = $this->rewrite_distinct_order($sql);
     // Quoting goes last: the rewrites above parse table names with plain \w+
     // patterns, which double quotes would break.
     $sql = $this->quote_reserved($sql);
@@ -564,6 +565,202 @@ class DB_Sql_vb {
       $out[$table] = $table;
     }
     return $out;
+  }
+
+  // MySQL accepts "SELECT DISTINCT a, b ... ORDER BY c" even when c is not in
+  // the select list; PostgreSQL rejects it with "for SELECT DISTINCT, ORDER BY
+  // expressions must appear in select list". search.php builds exactly that
+  // (sorting threads by forum title or thread title while selecting only
+  // threadid). Wrap the statement: the inner query keeps DISTINCT over the
+  // original columns plus the sort expressions, the outer one projects the
+  // original columns back and does the ordering, so the result shape is
+  // unchanged. The extra sort columns are functionally dependent on the rows
+  // being de-duplicated, so the row count stays the same.
+  private function rewrite_distinct_order($sql) {
+    if (!preg_match('/^\s*SELECT\s+DISTINCT\b/i', $sql, $m)) {
+      return $sql;
+    }
+    $list_start = strlen($m[0]);
+    $from = $this->find_top_keyword($sql, 'FROM', $list_start);
+    if ($from === false) {
+      return $sql;
+    }
+    $order = $this->find_top_order_by($sql, $from);
+    if ($order === false) {
+      return $sql;
+    }
+    list($order_pos, $order_list_start) = $order;
+    $limit = $this->find_top_keyword($sql, 'LIMIT', $order_list_start);
+    $order_end = ($limit === false) ? strlen($sql) : $limit;
+
+    $select_list = substr($sql, $list_start, $from - $list_start);
+    $order_list  = substr($sql, $order_list_start, $order_end - $order_list_start);
+    $body        = substr($sql, $from, $order_pos - $from);
+    $tail        = substr($sql, $order_end);
+
+    $items = $this->split_top_level($select_list);
+    $names = array();
+    $expressions = array();
+    $inner_items = array();
+    foreach ($items as $item) {
+      $item = trim($item);
+      if ($item === '') {
+        return $sql;
+      }
+      $name = $this->select_output_name($item);
+      if ($name === null) {
+        return $sql; // an expression we cannot name again: leave the statement alone
+      }
+      $names[] = $name;
+      $expressions[] = $this->normalize_expr($this->strip_select_alias($item));
+      $inner_items[] = $item;
+    }
+
+    $order_out = array();
+    $alias = 0;
+    $added = false;
+    foreach ($this->split_top_level($order_list) as $term) {
+      $term = trim($term);
+      if ($term === '') {
+        continue;
+      }
+      $nulls = '';
+      if (preg_match('/\s+NULLS\s+(?:FIRST|LAST)\s*$/i', $term, $nm)) {
+        $nulls = $nm[0];
+        $term = substr($term, 0, -strlen($nm[0]));
+      }
+      $direction = '';
+      if (preg_match('/\s+(ASC|DESC)\s*$/i', $term, $dm)) {
+        $direction = ' ' . strtoupper($dm[1]);
+        $term = substr($term, 0, -strlen($dm[0]));
+      }
+      $term = trim($term);
+      if ($term === '') {
+        return $sql;
+      }
+      if (preg_match('/^\d+$/', $term)) {
+        $order_out[] = $term . $direction . $nulls; // an ordinal, PostgreSQL is fine with it
+        continue;
+      }
+      $norm = $this->normalize_expr($term);
+      $index = array_search($norm, $expressions, true);
+      if ($index !== false) {
+        $order_out[] = $this->quote_ident($names[$index]) . $direction . $nulls;
+        continue;
+      }
+      $alias++;
+      $inner_items[] = $term . ' AS _vb_order' . $alias;
+      $order_out[] = $this->quote_ident('_vb_order' . $alias) . $direction . $nulls;
+      $added = true;
+    }
+
+    if (!$order_out || !$added) {
+      return $sql; // PostgreSQL already accepts it as written
+    }
+
+    $projected = array();
+    foreach ($names as $name) {
+      $projected[] = $this->quote_ident($name);
+    }
+    $inner_sql = 'SELECT DISTINCT ' . implode(', ', $inner_items) . ' ' . ltrim($body);
+    return 'SELECT ' . implode(', ', $projected) .
+           ' FROM (' . $inner_sql . ') AS "_vb_distinct"' .
+           ' ORDER BY ' . implode(', ', $order_out) .
+           ($tail !== '' ? ' ' . ltrim($tail) : '');
+  }
+
+  // Output column name of one select list item, or null when it cannot be
+  // expressed again from the outside of a subquery.
+  private function select_output_name($item) {
+    if (preg_match('/\s+AS\s+([A-Za-z_][\w$]*)\s*$/i', $item, $m)) {
+      return strtolower($m[1]);
+    }
+    if (preg_match('/^([A-Za-z_][\w$]*)(?:\s*\.\s*([A-Za-z_][\w$]*))?$/', $item, $m)) {
+      return strtolower((isset($m[2]) && $m[2] !== '') ? $m[2] : $m[1]);
+    }
+    return null;
+  }
+
+  private function strip_select_alias($item) {
+    if (preg_match('/^(.*?)\s+AS\s+[A-Za-z_][\w$]*\s*$/i', $item, $m)) {
+      return $m[1];
+    }
+    return $item;
+  }
+
+  private function normalize_expr($expr) {
+    return strtolower(preg_replace('/\s+/', '', (string) $expr));
+  }
+
+  // First "ORDER BY" outside parentheses and string literals, as
+  // array(position, position just after "BY").
+  private function find_top_order_by($sql, $offset) {
+    $len = strlen($sql);
+    $depth = 0;
+    $quote = null;
+    for ($i = $offset; $i < $len; $i++) {
+      $c = $sql[$i];
+      if ($quote !== null) {
+        if ($c == '\\') {
+          $i++;
+        } elseif ($c == $quote) {
+          $quote = null;
+        }
+        continue;
+      }
+      if ($c == "'" || $c == '"') {
+        $quote = $c;
+        continue;
+      }
+      if ($c == '(') {
+        $depth++;
+        continue;
+      }
+      if ($c == ')') {
+        $depth--;
+        continue;
+      }
+      if ($depth == 0 && $this->word_at($sql, $i, 'ORDER')) {
+        if (preg_match('/^ORDER\s+BY\b/i', substr($sql, $i, 16), $m)) {
+          return array($i, $i + strlen($m[0]));
+        }
+      }
+    }
+    return false;
+  }
+
+  // Position of the first top-level occurrence of a single keyword.
+  private function find_top_keyword($sql, $word, $offset) {
+    $len = strlen($sql);
+    $depth = 0;
+    $quote = null;
+    for ($i = $offset; $i < $len; $i++) {
+      $c = $sql[$i];
+      if ($quote !== null) {
+        if ($c == '\\') {
+          $i++;
+        } elseif ($c == $quote) {
+          $quote = null;
+        }
+        continue;
+      }
+      if ($c == "'" || $c == '"') {
+        $quote = $c;
+        continue;
+      }
+      if ($c == '(') {
+        $depth++;
+        continue;
+      }
+      if ($c == ')') {
+        $depth--;
+        continue;
+      }
+      if ($depth == 0 && $this->word_at($sql, $i, $word)) {
+        return $i;
+      }
+    }
+    return false;
   }
 
   // Bare occurrences of the reserved identifiers used by this schema get
