@@ -162,6 +162,9 @@ function getpostbit($post) {
 	global $counter,$firstnew,$sigcache,$highlight,$postid,$forum;
 	// global options
 	global $showdeficon,$displayemails,$enablepms,$allowsignatures,$wordwrap,$dateformat,$timeformat,$logip,$replacewords,$postsperday,$avatarenabled,$registereddateformat,$viewattachedimages;
+	// Attachment display mode (Attachments settings group). Boards installed before
+	// the PHP 8 port have no rows for these, so default to full size when unset.
+	global $attachthumbmode,$attachthumbwidth,$attachthumbheight;
 
 	$datecut = time() - $cookietimeout;
 
@@ -196,6 +199,15 @@ function getpostbit($post) {
 		if ($post['attachmentextension']=="gif" or $post['attachmentextension']=="jpg" or $post['attachmentextension']=="jpeg" or $post['attachmentextension']=="jpe" or $post['attachmentextension']=="png") {
 			if (($viewattachedimages) and ($bbuserinfo['userid']==0 or $bbuserinfo['showimages'])) {
 				eval("\$post[attachment] = \"".gettemplate("postbit_attachmentimage")."\";");
+				if (!empty($attachthumbmode)) {
+					// Thumbnail mode: scale the image down and wrap it in a link
+					// so clicking it still opens the original attachment.
+					$post['attachment'] = vb_attachment_thumbnail(
+						$post['attachment'],
+						isset($attachthumbwidth) ? $attachthumbwidth : 480,
+						isset($attachthumbheight) ? $attachthumbheight : 360
+					);
+				}
 			} else {
 				eval("\$post[attachment] = \"".gettemplate("postbit_attachment")."\";");
 			}

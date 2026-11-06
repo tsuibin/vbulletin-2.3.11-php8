@@ -280,7 +280,53 @@ img[src*="attachment.php"] {
 	height: auto;
 	vertical-align: middle;
 }
+a.vbattachthumb {
+	display: inline-block;
+	text-decoration: none;
+}
+a.vbattachthumb img {
+	cursor: zoom-in;
+}
 </style>
 CSS;
+    }
+}
+
+// ---------------------------------------------------------------------
+// Thumbnail mode for image attachments.
+//
+// The postbit_attachmentimage template is stored in the database, so instead of
+// rewriting the template we post-process its output: the <img> keeps its src
+// (the full-size attachment) and gets an inline max-width / max-height, and the
+// whole thing is wrapped in a link to that same URL so a click still opens the
+// original image. A zero limit means "no limit" and is skipped.
+// ---------------------------------------------------------------------
+if (!function_exists('vb_attachment_thumbnail')) {
+    function vb_attachment_thumbnail($html, $maxwidth = 480, $maxheight = 360)
+    {
+        // Capture the whole <img> tag, not just up to the closing quote of src,
+        // otherwise the remaining attributes are left behind in the post text.
+        if (!preg_match('/<img\b[^>]*\bsrc="([^"]*attachment\.php[^"]*)"[^>]*>/i', $html, $match)) {
+            return $html;
+        }
+
+        $src = $match[1];
+        $tag = $match[0];
+
+        $style = '';
+        if ((int) $maxwidth > 0) {
+            $style .= 'max-width:' . (int) $maxwidth . 'px;';
+        }
+        if ((int) $maxheight > 0) {
+            $style .= 'max-height:' . (int) $maxheight . 'px;';
+        }
+        if ($style !== '') {
+            $style .= 'width:auto;height:auto;';
+            $tag = preg_replace('/\s*\/?>$/', ' style="' . $style . '">', $tag);
+        }
+
+        $link = '<a href="' . $src . '" target="_blank" class="vbattachthumb">' . $tag . '</a>';
+
+        return str_replace($match[0], $link, $html);
     }
 }

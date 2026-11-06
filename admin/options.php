@@ -4,6 +4,14 @@ error_reporting(7);
 
 require("./global.php");
 
+// Create the attachment-thumbnail settings if this board was installed before
+// they existed, and refresh the compiled 'options' template so they take effect.
+// Only for a logged-in administrator: admin/global.php renders the login form
+// without stopping execution, so an anonymous hit would otherwise write rows.
+if (!empty($bbuserinfo['userid'])) {
+  vb_attachment_settings_ensure();
+}
+
 adminlog();
 
 cpheader();

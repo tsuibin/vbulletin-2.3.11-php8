@@ -889,6 +889,45 @@ img[src*="attachment.php"] {
 - `showthread.php` / `index.php` / `forumdisplay.php` / `usercp.php` / `private.php` /
   `memberlist.php` 全部 200
 
+#### 4.17.10 附件图片的缩略图模式（后台可切换）
+
+2.3.11 原来只有一个「View Images」开关：要么原图直接铺在帖子里，要么只给下载链接。
+现在多一个「默认显示缩略图，还是原图」的选择，落在后台 **Attachments** 设置组的三个设置项上：
+
+| varname | 标题 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `attachthumbmode` | Display Attachments as Thumbnails | `1` | 是＝帖内显示缩略图，点击缩略图在新窗口打开原图；否＝按原图大小显示 |
+| `attachthumbwidth` | Thumbnail Maximum Width | `480` | 缩略图最大宽度（px），`0` 为不限制 |
+| `attachthumbheight` | Thumbnail Maximum Height | `360` | 缩略图最大高度（px），`0` 为不限制 |
+
+实现上有两个与 vB2 结构有关的约束：
+
+- **设置项不是直接读的。** 前端通过 `global.php` 把 `template` 表里一条名为 `options` 的
+  记录 `eval` 出来，这条记录是 `generateoptions()` 把 `setting` 表编译成的 PHP 赋值语句。
+  所以新增设置必须（1）有 `setting` 行，（2）重新编译 `options` 模板，否则前台读不到。
+- **模板又在数据库里。** `postbit_attachmentimage` 是 DB 模板，不能在渲染前改模板文本来加
+  `max-width`。于是改成对渲染结果做后处理：`vb_attachment_thumbnail()` 匹配那个 `<img>`
+  （**整段标签**一起匹配，只匹配到 `src` 引号会把后面的 `border="0" vspace=8` 漏在正文里，
+  这是第一版踩的坑），给标签补一段内联 `max-width/max-height`，再把整张图包进
+  `<a href="原图URL" target="_blank" class="vbattachthumb">`，点击仍然看原图。
+
+已有论坛怎么拿到这三个设置：`admin/options.php` 载入时调用
+`vb_attachment_settings_ensure()`——只补缺失的 `varname`，补完立刻重编译 `options` 模板。
+调用点加在 `$bbuserinfo['userid']` 非空之后：`admin/global.php` 遇到未登录只是打印登录表单、
+并不会中止执行，不判身份的话匿名请求也能往 `setting` 表写数据。全新安装则由
+`install4php5.php` / `installed.php` 的 `INSERT` 直接建好。
+
+真机验证（PHP 8.5 + PG 18.6）：
+
+- 打开后台 Options 页，三个设置自动出现（中文界面显示「附件图片显示缩略图」「缩略图最大宽度」
+  「缩略图最大高度」），`options` 模板同步出现 `$attachthumbmode = "1";`
+- 后台 POST 保存切到「否」→ `setting` 值与 `options` 模板同时变 `0`，前台 1600×900 图恢复
+  1031×585（`max-width:100%` 仍然守着版心），且不再被 `<a>` 包裹
+- 切回「是」→ 1600×900 渲染成 480×275、480×300 渲染成 480×305（`box-sizing:border-box`
+  下 480 含 5px 内边距＋1px 边框），40×30 小图仍是 52×42；图片都包在链接里
+- 点击缩略图拿到的 `attachment.php` 响应仍是 `image/png` 6672 字节，与原文件 `cmp` 一致
+- `showthread.php` 各模式均 200，页面无横向溢出
+
 ## 5. 运行要求
 
 | 组件 | 要求 |

@@ -382,6 +382,47 @@ function makeforumchoosercode ($title,$name,$selvalue=-1,$extra="") {
 
 }
 
+// ###################### Start attachment thumbnail settings #######################
+// The PHP 8 port adds a thumbnail mode for image attachments on top of the
+// classic "View Images" switch. Boards installed before that change have no
+// rows for it in the setting table, and a setting only reaches the front end
+// after it is compiled into the 'options' template, so the rows are created
+// (and the template refreshed) the first time an administrator opens Options.
+// Idempotent: only missing varnames are inserted.
+function vb_attachment_settings_ensure() {
+  global $DB_site;
+
+  $defaults = array(
+    'attachthumbmode'   => array(27, 'Display Attachments as Thumbnails', '1',
+      'Show a scaled-down copy of image attachments inside posts. Clicking the thumbnail opens the original image. Select No to always show attachments at their original size.', 'yesno', 7),
+    'attachthumbwidth'  => array(27, 'Thumbnail Maximum Width', '480',
+      'Maximum width in pixels for attachment thumbnails; larger images are scaled proportionally. 0 = no limit.', '', 8),
+    'attachthumbheight' => array(27, 'Thumbnail Maximum Height', '360',
+      'Maximum height in pixels for attachment thumbnails. 0 = no limit.', '', 9),
+  );
+
+  $existing = array();
+  $rows = $DB_site->query("SELECT varname FROM setting WHERE varname IN ('attachthumbmode','attachthumbwidth','attachthumbheight')");
+  while ($row = $DB_site->fetch_array($rows)) {
+    $existing[$row['varname']] = 1;
+  }
+
+  $added = false;
+  foreach ($defaults as $varname => $def) {
+    if (isset($existing[$varname])) {
+      continue;
+    }
+    list($groupid, $title, $value, $description, $optioncode, $displayorder) = $def;
+    $DB_site->query("INSERT INTO setting (settinggroupid,title,varname,value,description,optioncode,displayorder) VALUES ('$groupid','".vb_escape($title)."','$varname','$value','".vb_escape($description)."','$optioncode','$displayorder')");
+    $added = true;
+  }
+
+  if ($added) {
+    $optionstemplate = generateoptions();
+    $DB_site->query("UPDATE template SET template='$optionstemplate' WHERE title='options'");
+  }
+}
+
 // ###################### Start generateoptions #######################
 function generateoptions() {
   global $DB_site;
