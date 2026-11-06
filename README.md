@@ -589,11 +589,30 @@ free_result / query_first / data_seek / num_rows / num_fields / insert_id / clos
    已跑过的页面没有触发，但论坛统计、日历、版块聚合这类查询没有逐条排查。
 3. **整型列与空串比较**：`WHERE userid=''` 在 MySQL 里恒为假、在 PG 里报
    `invalid input syntax for integer`。代码里主要走 PHP 判空，未系统性排查。
-4. **`admin/backup.php` 的导出仍是 MySQL 方言**（`SHOW FIELDS/KEYS` 已由 shim 覆盖，
-   `SHOW TABLES` 实测返回 40 行），但生成的 `CREATE TABLE` 不能导回 PG；`restore` 同理。
-5. 全文检索 / `searchindex` 的分词逻辑未按 PG 调整（`REPLACE INTO` 在该表上按无主键处理，
+4. 全文检索 / `searchindex` 的分词逻辑未按 PG 调整（`REPLACE INTO` 在该表上按无主键处理，
    退化成了普通 INSERT，与 MySQL 行为一致）。
-6. 排序与大小写：`ORDER BY` 在 MySQL 默认 ci、PG 按字节序，中文/英文混排顺序会不一致。
+5. 排序与大小写：`ORDER BY` 在 MySQL 默认 ci、PG 按字节序，中文/英文混排顺序会不一致。
+
+#### 4.17.1 备份导出（`admin/backup.php`）
+
+导出格式**跟随当前配置的数据库自动切换**，管理员不需要做任何选择：MySQL 上仍是原来的
+MySQL dump，PostgreSQL 上输出可直接 `psql -f` 导入的 PG dump。两套写入器都在
+`admin/backup_dump.php`，页面侧只调用 `sqldumptable()`，由 `backup_is_pgsql()` 分派。
+
+PG 侧的 schema 不从 `SHOW FIELDS` 拼（那个 shim 只给得出 PG 类型名），而是查 `pg_catalog`：
+
+- 列按 `attnum` 顺序取 `format_type`、`attnotnull`、`pg_get_expr(默认值)`，
+  `nextval(...)` 默认值的列还原成 `serial` / `bigserial`，表重建时序列一起回来
+- `PRIMARY KEY` / `UNIQUE` 用 `pg_get_constraintdef` 原样写进 `CREATE TABLE`
+- 其余索引用 `pg_get_indexdef` 单独输出 `CREATE INDEX`（约束已带的索引跳过）
+- 数据用 `INSERT INTO ... (列清单) VALUES (...)`，列清单显式写死，列顺序变化也能导回；
+  `bytea` 走 `decode('hex','hex')`，避免反斜杠交给字符串字面量
+- 每个 serial 列在表末尾补 `setval(seq, MAX(col))`，还原后自增不会从 1 重来
+- 文件头带 `SET client_encoding = 'UTF8'` 与 `SET standard_conforming_strings = on`
+
+真机验证（PostgreSQL 18.6）：页面「SQL Dump」导出 40 张表、614 KB，`psql` 导入空库
+**0 报错**、表数 40、模板/设置/设置组/替换集/用户行数与源库逐一相同，还原库 `index.php`
+正常出页（200，内容与源库一致）；自增序列续接正确。「保存到服务器文件」与 CSV 导出同样跑通。
 
 ## 5. 运行要求
 
