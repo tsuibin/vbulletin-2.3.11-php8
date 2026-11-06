@@ -684,8 +684,8 @@ UPDATE LOW_PRIORITY session SET lastactivity=... WHERE sessionhash='...'  -- adm
 - 保存后下一个请求即生效，不必重启（开了 opcache 的 FPM 建议 reload 一次）
 
 代价与回退：新配置连不上时前台会打不开，把最近的 `config.php.bak.*` 覆盖回 `config.php` 即可，
-页面上也写了这句。切换引擎不会迁移数据——目标库必须先有 vB 的表（跑安装器，或用 4.17.1 的
-导出再 `psql -f` 导入）。
+页面上也写了这句。只点 `Save settings` 不会迁移数据——目标库得先有 vB 的表；要让页面自己把
+数据搬过去，用 4.17.7 的 `Copy data to this database and switch`。
 
 真机验证（PG 18.6 站点 + PHP 8.5）：页面正确列出当前 PG 配置；`Test connection` 对
 `host=/tmp port=5433 dbname=vb2311 schema=public` 报“已连接 PostgreSQL 18.6、40 张表”；
@@ -756,6 +756,70 @@ SELECT "threadid" FROM (
 的 `title|forum|lastpost|replies|views|poster` 六种排序同样全部正常。造了 3 个主题、4 条帖子做过
 对照：`ORDER BY thread.lastpost DESC` 出 `902,903,901`，`ORDER BY thread.title ASC` 出
 `902,901,903`，`ORDER BY forum.title DESC` 把另一个版块的主题排在最前，去重后仍是 3 行。
+
+#### 4.17.7 后台一键换引擎（连接档案 + 跨引擎数据迁移）
+
+`admin/dbsettings.php` 现在不只是“填一串连接参数再保存”，它把两个引擎当成两个可切换的
+目标来管理，页面在 `Import & Maintenance` 下（Back-up Database 之后）。
+
+**按引擎记住连接信息。** 连接参数存进 `admin/config.php` 的 `$dbprofiles` 里，一个引擎一份：
+
+```php
+$dbprofiles = array(
+	'pgsql' => array('servername' => '/tmp', 'dbport' => '5433', 'dbschema' => 'public',
+	                 'dbusername' => 'user', 'dbpassword' => '', 'dbname' => 'vb2311', 'usepconnect' => '0'),
+	'mysql' => array('servername' => '127.0.0.1', 'dbport' => '3306', 'dbschema' => '',
+	                 'dbusername' => 'vbuser', 'dbpassword' => 'vbpass', 'dbname' => 'vb2311_mysql', 'usepconnect' => '0'),
+);
+```
+
+在 Database type 下拉框里换引擎会立刻提交一次 `action=load`，把该引擎上次保存的
+主机/端口/schema/用户名/密码/库名填回表单——不用记、也不用重填。档案和当前生效的
+8 个赋值写在同一个文件里，所以切换是原子的：不会出现“档案已改、生效配置没改”的半截状态；
+写盘前仍然先 `token_get_all($text, TOKEN_PARSE)` 校验、并留一份 `config.php.bak.<时间>`。
+
+**数据迁移（新文件 `admin/dbsettings_migrate.php`）。** 按钮是
+`Copy data to this database and switch`，一次点击把当前数据库整库复制到表单里填的目标库，
+成功后才改配置：
+
+1. **读源库结构**：`information_schema.columns` + `pg_indexes`/`SHOW INDEX`，归一成
+   int / bigint / smallint / varchar / text / blob / temporal / decimal / float 八类
+2. **按目标方言出 DDL**：PostgreSQL 侧 `serial`、`character varying(n)`、`bytea`、
+   `numeric(p,s)`；MySQL 侧 `bigint(20) … AUTO_INCREMENT`、`mediumtext`、`longblob`、
+   `ENGINE=MyISAM DEFAULT CHARSET=utf8mb4`。PostgreSQL 的索引名按 schema 唯一，所以名字
+   会自动带上表名前缀；主键写进 `CREATE TABLE`，其余索引在数据搬完后建
+3. **NOT NULL 补默认值**：沿用安装器的约定（数值补 `0`、字符补 `''`），否则 vB 那些
+   “不给该列赋值”的 INSERT 会被拒绝
+4. **搬数据**：每 200 行一批 `INSERT ... VALUES (...),(...)`，带显式列清单。跨引擎的值差异
+   在这一步处理——PostgreSQL 的 `bytea`（hex 输出）解码成二进制再写成 MySQL 字符串、
+   反过来 MySQL 的 `longblob` 原样写成 `'\x<hex>'` 字面量；`mysqli_real_escape_string`
+   在字节层面安全，附件/头像不会坏
+5. **续接自增**：PostgreSQL 逐表 `setval(pg_get_serial_sequence(...), MAX(col))`，
+   MySQL 逐表 `ALTER TABLE ... AUTO_INCREMENT = MAX+1`，迁移后新帖不会撞 id
+6. **逐表核对行数**：任何一张表对不上就报错并**不写配置**，论坛继续跑在原库上
+7. **写配置**：把目标连接写成生效配置、同时把两台机器的连接信息都存进 `$dbprofiles`。
+   原库不删、不锁，随时在 Dropdown 里选回原引擎保存即可切回
+
+几个安全判定：目标库已有同名表 → 拒绝（除非勾 `Recreate tables in the target database`，
+勾了会先 `DROP TABLE ... CASCADE`）；目标库连不上 → 只报错不写配置；目标与当前是同一个
+库 → 直接拒绝；库名不存在 → 报“连接失败”，配置保持原样。
+
+真机验证（PostgreSQL 18.6 + MariaDB 10.6.23 + PHP 8.5）：
+
+- **PG → PG**（`vb2311` → 空库 `vb2311_pg2`）：40 张表、20 张有数据的表逐表行数一致，
+  自增序列停在 `MAX(postid)=900004` / `MAX(threadid)=903`；站点 index/forumdisplay/
+  showthread/usercp/memberlist/calendar/online/private/register/后台 全部 200
+- **PG → MySQL**：40 张表建好、行数全部一致，`attachment.filedata` 242 字节 PNG 在
+  MySQL 里 `HEX()` 与源文件逐字节相同（`longblob`）；站点换到 MySQL 后同样 12 个页面全 200，
+  后台也能登录
+- **MySQL → PG**（回到新建的 `vb2311_back`）：行数一致、附件字节仍一致、
+  `user.birthday` 仍是 `character varying(19)`；`attachment.php?attachmentid=2001`
+  下载回来 `image/png`、242 字节、`cmp` 与原始文件一致
+- **护栏**：目标库已有表且未勾 recreate → 明确拒绝并列出入侵的表名；勾 recreation →
+  先删 40 张旧表再复制、校验通过；目标库不存在 → “连接失败：/tmp:5433/nosuchdb”、
+  `dbname` 仍是原值；同一库 → 拒绝
+- **档案**：`action=load` 切到 MySQL 时表单回填 `127.0.0.1` / `vbuser` / `vb2311_mysql`，
+  切回 PostgreSQL 时回填 `/tmp` / `5433` / `vb2311_back`，页面上两个引擎都标着 `(已保存)`
 
 ## 5. 运行要求
 
