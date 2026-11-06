@@ -394,6 +394,14 @@ class DB_Sql_vb {
     }
 
     $sql = $this->rewrite_priority_modifiers($sql);
+
+    // INSERT IGNORE is handled in two steps: the keyword is removed here so the
+    // later INSERT rewrites can parse the statement, and the PostgreSQL
+    // equivalent (ON CONFLICT DO NOTHING) is appended once they are done.
+    $insert_ignore = (bool) preg_match('/^\s*INSERT\s+IGNORE\b/i', $sql);
+    if ($insert_ignore) {
+      $sql = preg_replace('/^\s*INSERT\s+IGNORE\s+(INTO\s+)?/i', 'INSERT INTO ', $sql, 1);
+    }
     $sql = $this->rewrite_from_joins($sql);
     $sql = $this->rewrite_empty_numeric($sql);
     $sql = $this->rewrite_limit($sql);
@@ -406,6 +414,9 @@ class DB_Sql_vb {
     $sql = $this->rewrite_like($sql);
     $sql = $this->rewrite_instr($sql);
     $sql = $this->rewrite_distinct_order($sql);
+    if ($insert_ignore) {
+      $sql = $this->append_conflict_do_nothing($sql);
+    }
     // Quoting goes last: the rewrites above parse table names with plain \w+
     // patterns, which double quotes would break.
     $sql = $this->quote_reserved($sql);
@@ -868,6 +879,21 @@ class DB_Sql_vb {
                  '%a' => 'Dy', '%M' => 'FMMonth', '%b' => 'Mon', '%j' => 'DDD', '%T' => 'HH24:MI:SS');
     $body = trim($fmt, " \t\n\r\0\x0B'\"");
     return "'" . strtr($body, $map) . "'";
+  }
+
+  // INSERT IGNORE ... -> INSERT ... ON CONFLICT DO NOTHING
+  //
+  // MySQL's IGNORE means "swallow duplicate-key (and a few other) errors". With
+  // no conflict target, ON CONFLICT DO NOTHING covers every unique index on the
+  // row, which is the closest PostgreSQL equivalent. Used by the search-index
+  // writer (word / searchindex) and by the importer.
+  private function append_conflict_do_nothing($sql) {
+    $tail = '';
+    if (preg_match('/;\s*$/', $sql)) {
+      $sql = preg_replace('/;\s*$/', '', $sql);
+      $tail = ';';
+    }
+    return rtrim($sql) . ' ON CONFLICT DO NOTHING' . $tail;
   }
 
   // REPLACE INTO t (a,b,c) VALUES ... -> INSERT INTO t (a,b,c) VALUES ...

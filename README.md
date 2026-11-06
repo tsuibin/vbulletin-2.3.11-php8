@@ -928,6 +928,42 @@ img[src*="attachment.php"] {
 - 点击缩略图拿到的 `attachment.php` 响应仍是 `image/png` 6672 字节，与原文件 `cmp` 一致
 - `showthread.php` 各模式均 200，页面无横向溢出
 
+#### 4.17.11 `INSERT IGNORE` → `ON CONFLICT DO NOTHING`
+
+编辑帖子保存时报：
+
+```
+Invalid SQL: INSERT IGNORE INTO word (wordid,title) VALUES (NULL,'post'),(NULL,'thread'),(NULL,'试试看')
+pgsql error: ERROR:  syntax error at or near "IGNORE"
+```
+
+`INSERT IGNORE` 是 MySQL 专有语法（「撞唯一键就跳过，不报错」），PostgreSQL 没有，同名等价
+物是 `ON CONFLICT DO NOTHING`。帖子的搜索词写入（`updatewords()` 里的 `word` /
+`searchindex`）以及 `admin/bbimport.php` 的导入都用了它。
+
+驱动 `translate()` 里分两步处理：
+
+1. 先删掉 `IGNORE` 关键字（放在 `rewrite_priority_modifiers()` 之后，这样
+   `INSERT LOW_PRIORITY IGNORE` 这种叠加写法也能命中），让后面的 `rewrite_insert_nulls()`
+   仍能按 `INSERT INTO ... VALUES` 解析；
+2. 所有改写做完后，由 `append_conflict_do_nothing()` 在语句末尾补
+   `ON CONFLICT DO NOTHING`（语句带 `;` 时插在分号前）。
+
+不带冲突目标是有意的：`ON CONFLICT DO NOTHING` 不指定列时会跳过**任意**唯一索引冲突，
+和 MySQL `IGNORE` 的语义最接近；对没有唯一约束的表（如 `searchindex`）也不会报
+「no unique constraint」。`INSERT IGNORE ... SELECT` 同样适用。
+
+真机验证（PHP 8.5 + PG 18.6）：
+
+- `INSERT IGNORE INTO word (wordid,title) VALUES (NULL,'post'),(NULL,'thread'),(NULL,'试试看')`
+  → `INSERT INTO word (wordid,title) VALUES (DEFAULT,'post'),(DEFAULT,'thread'),(DEFAULT,'试试看') ON CONFLICT DO NOTHING`，执行成功
+- 重复插入同一批词不再报错，`word` 表保持 3 行（`title` 唯一约束生效）
+- `INSERT IGNORE ... SELECT DISTINCT ...` 同样翻译并执行成功
+- 用修复前的驱动快照跑同一条 SQL，翻译结果原样透传 `INSERT IGNORE`，可稳定复现该报错
+- 走页面：`editpost.php?action=updatepost` 编辑 post 900001 返回 200、正文落库、`word` 表
+  由 3 行涨到 7 行（新词入表）；`showthread` / `editpost` / `search.php` / `index` /
+  `forumdisplay` 全 200
+
 ## 5. 运行要求
 
 | 组件 | 要求 |
