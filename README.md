@@ -529,6 +529,7 @@ free_result / query_first / data_seek / num_rows / num_fields / insert_id / clos
 | `FROM a,b,c LEFT JOIN d ON (…a.列…)` | `functions.php:2544` 订阅通知等 | 逗号列表改写成 `CROSS JOIN`（见下） |
 | 字符串里的 `\'` / `\\` | 安装器、`addslashes` 产物 | 反转义后按 PG 规则双写单引号（`'Who\'s'` → `'Who''s'`） |
 | `SHOW TABLES` / `SHOW FIELDS` / `SHOW KEYS` | 安装器、`admin/backup.php` | 查 `pg_tables` / `information_schema`，列名按 MySQL 的名字起别名 |
+| `LOW_PRIORITY` / `HIGH_PRIORITY` / `DELAYED` | 主题浏览量、附件下载数、会话活跃时间等关机查询 | 直接删除（见 4.17.3） |
 | 表名 `user` | 全站 | `"user"`（`USER` 在 PG 里是保留字，且裸写会被当成 `current_user`） |
 
 两处改写的来由值得单独记一笔，它们都是**真机跑出来的**，不是预想的：
@@ -635,6 +636,31 @@ vB2 里大量 `WHERE userid=''` 的写法（会话查不到人时 `$bbuserinfo[u
 `memberlist.php`、`private.php`、`search.php`、`online.php`、`calendar.php`、
 `index.php`、`forumdisplay.php`、`showthread.php`、`register.php` 全部 200 且无 SQL 报错，
 文本列 `=''` 的语义与原来一致。
+
+#### 4.17.3 语句修饰符（`rewrite_priority_modifiers()`）
+
+vB2 把大量计数写成 MySQL 专有的**语句修饰符**形式，典型是关机查询：
+
+```sql
+UPDATE LOW_PRIORITY thread SET views=views+1 WHERE threadid='3'      -- showthread.php
+UPDATE LOW_PRIORITY attachment SET counter=counter+1 WHERE ...       -- attachment.php
+UPDATE LOW_PRIORITY session SET lastactivity=... WHERE sessionhash='...'  -- admin/sessions.php
+```
+
+这些修饰符必须紧跟在动词后面（`UPDATE LOW_PRIORITY t`、`INSERT DELAYED INTO t`）。PG 没有
+对应的关键字，会把 `LOW_PRIORITY` 当成表名，报
+`relation "low_priority" does not exist`。因为它们是**关机查询**（`$shutdownqueries`，
+在页面渲染完之后才执行），报错不体现在页面上——页面照常 200，只是**浏览量、附件下载数、
+在线状态时间这些计数一直不增长**，日志里每次访问留一条 ERROR。
+
+修法是在 `translate()` 最前面删掉这个修饰符：`LOW_PRIORITY` / `HIGH_PRIORITY` 对
+`INSERT` / `REPLACE` / `UPDATE` / `DELETE` / `SELECT` 都合法；`DELAYED` 只对
+`INSERT` / `REPLACE` 处理，避免把名叫 `delayed` 的列误删。删掉不改变语义：这些关键字
+只是让 MySQL 把写操作推迟/降优先级，结果集完全一样。
+
+真机验证（PostgreSQL 18.6）：改前每次 `showthread.php` / `attachment.php` 都留下
+`relation "low_priority" does not exist`；改后访问同一主题，`thread.views` 7 → 8、
+`attachment.counter` 3 → 4，日志不再出现该报错。
 
 ## 5. 运行要求
 

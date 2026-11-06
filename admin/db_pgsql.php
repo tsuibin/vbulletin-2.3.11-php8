@@ -322,6 +322,26 @@ class DB_Sql_vb {
 
   // ----------------------------------------------------------- SQL translation
 
+  // MySQL-only statement modifiers (LOW_PRIORITY / HIGH_PRIORITY / DELAYED) sit
+  // right after the verb: "UPDATE LOW_PRIORITY thread SET views=views+1 ...".
+  // PostgreSQL has no such keywords, and without stripping them it reads
+  // LOW_PRIORITY as a table name ("relation \"low_priority\" does not exist").
+  // vB2 sends most counters as shutdown queries of this form (thread views,
+  // attachment downloads, session lastactivity), so the whole update was lost
+  // silently. Dropping the keyword is behaviourally correct: it only asks MySQL
+  // to defer the write, never changes the result.
+  private function rewrite_priority_modifiers($sql) {
+    $sql = preg_replace(
+      '/^(\s*(?:INSERT|REPLACE|UPDATE|DELETE|SELECT)\s+)(?:LOW_PRIORITY|HIGH_PRIORITY)\s+/i',
+      '$1',
+      $sql,
+      1
+    );
+    // DELAYED is only legal after INSERT/REPLACE; keep it out of the verb list
+    // above so a column literally named "delayed" is never touched.
+    return preg_replace('/^(\s*(?:INSERT|REPLACE)\s+)DELAYED\s+/i', '$1', $sql, 1);
+  }
+
   // Entry point: turn a MySQL statement into one PostgreSQL accepts.
   function translate($sql) {
     $sql = trim($sql);
@@ -341,6 +361,7 @@ class DB_Sql_vb {
       return $this->show_keys_sql($m[1]);
     }
 
+    $sql = $this->rewrite_priority_modifiers($sql);
     $sql = $this->rewrite_from_joins($sql);
     $sql = $this->rewrite_empty_numeric($sql);
     $sql = $this->rewrite_limit($sql);
